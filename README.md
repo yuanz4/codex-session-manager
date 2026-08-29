@@ -57,7 +57,7 @@ recency and auto-refreshed every 5s.
 |----------------|-----------------------------------------------------|
 | `↑` `↓` / `j` `k` | move selection                                  |
 | `g` / `G`      | jump to top / bottom                                |
-| `Enter`        | attach: resume that session in tmux and switch to it |
+| `Enter` / `→` | attach: resume that session in tmux and switch to it |
 | `n`            | new session (optional seed prompt)                   |
 | `r`            | refresh now (auto-refreshes every 5s)                |
 | `/`            | filter by title / id / cwd                           |
@@ -67,6 +67,13 @@ recency and auto-refreshed every 5s.
 | `x`            | kill the tmux session for the selected codex session |
 | `?`            | show help / keybindings (in-app)                    |
 | `q` / `Esc`    | quit (clears filter first, then quits)              |
+
+**Arrow navigation:** `→` (right) on a session enters it; `←` (left) inside any
+Codex session switches back to this menu. The `←` binding is installed per
+Codex tmux session via a dedicated tmux key-table, so the manager UI is
+unaffected. Note: because `←` is intercepted inside Codex sessions, you can't
+use the left-arrow to move the cursor inside Codex's input box — use `Ctrl-b s`
+to return instead if you need full editing keys.
 
 Archived sessions are hidden by default. Run `codex-sm tui --all` to list them;
 select one and press `u` to unarchive it back to active.

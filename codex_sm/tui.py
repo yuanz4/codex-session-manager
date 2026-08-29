@@ -200,7 +200,7 @@ def _draw(stdscr, state):
     except curses.error:
         pass
 
-    keys = "Enter attach · n new · r refresh · /filter · a archive · u unarchive · D delete · x kill tmux · ? help · q quit"
+    keys = "→/Enter attach · n new · r refresh · /filter · a archive · u unarchive · D delete · x kill tmux · ? help · q quit"
     try:
         stdscr.addstr(h - 1, 0, _truncate(keys, w), curses.A_BOLD)
     except curses.error:
@@ -213,7 +213,7 @@ HELP_LINES = [
     "",
     "  ↑ ↓  /  j k   move selection",
     "  g  /  G       top / bottom",
-    "  Enter         resume selected session in a tmux session, switch into it",
+    "  Enter / →     resume selected session in a tmux session, switch into it",
     "  n             start a new Codex session (optional seed prompt)",
     "  r             refresh now   (auto-refreshes every 5s)",
     "  /             filter by title / id / cwd     (Esc clears)",
@@ -226,11 +226,9 @@ HELP_LINES = [
     "",
     "Status:  ● running   ○ ready   ✖ error",
     "",
-    "Archived sessions are hidden by default; start with:  codex-sm tui --all",
-    "",
     "Returning to this menu from a Codex session:",
-    "  Ctrl-b s       open tmux session list, choose 'codex-sm'",
-    "  Ctrl-b d       detach (manager stays in 'codex-sm'; reattach: tmux a -t codex-sm)",
+    "  ←  (left)      inside any codex session, switches back here",
+    "  Ctrl-b s       pick 'codex-sm' from tmux's session list",
     "",
     "Press any key to close this help.",
 ]
@@ -415,7 +413,7 @@ def _run(stdscr, home: str | None, include_archived: bool):
             state["selected"] = max(0, len(state["filtered"]) - 1)
         elif ch == curses.KEY_RESIZE:
             curses.resizeterm(*stdscr.getmaxyx())
-        elif ch in (curses.KEY_ENTER, 10, 13):
+        elif ch in (curses.KEY_ENTER, 10, 13, curses.KEY_RIGHT, ord("l")):
             _attach(state, stdscr)
         elif ch == ord("n"):
             _new_session(state, stdscr)
