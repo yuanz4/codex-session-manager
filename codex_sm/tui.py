@@ -100,12 +100,10 @@ def _summary_char(sess) -> str:
         return "✓"
     if state == "in_progress":
         return "…"
-    if state == "disabled":
-        return "✕"
     return " "
 
 
-SMRY_ATTR = {"done": 2, "in_progress": 4, "disabled": 0, "none": 0}  # color pair (2 green, 4 yellow)
+SMRY_ATTR = {"done": 2, "in_progress": 4, "none": 0}  # color pair (2 green, 4 yellow)
 
 
 
@@ -292,7 +290,7 @@ def _draw(stdscr, state):
     except curses.error:
         pass
 
-    keys = "→/Enter attach · n new · s summary · space toggle-sum · d delete · x kill · ? help · q quit"
+    keys = "→/Enter attach · n new · space summary · d delete · x kill · ? help · q quit"
     try:
         stdscr.addstr(h - 1, 0, _truncate(keys, w), curses.A_BOLD)
     except curses.error:
@@ -308,17 +306,14 @@ HELP_LINES = [
     "  Enter / →     resume selected session in a tmux session, switch into it",
     "  n             start a new Codex session (popup for optional seed prompt)",
     "  r             refresh now   (auto-refreshes every 5s)",
-    "  s             view the stored summary for the selected session",
-    "  space         toggle auto-summary on/off for the selected session",
-    "                 on:  summarize when it becomes ready (and now if ready)",
-    "                 off: won't be summarized (existing summary is kept)",
+    "  space         view the summary for the selected session (tap again to close)",
     "  d             delete selected   (popup confirm; codex delete --force)",
     "  x             kill the tmux session for the selected Codex session",
     "  ?             show this help",
     "  q  /  Esc     quit",
     "",
     "Status:   ● running   ○ ready   ✖ error",
-    "Summary:  ✓ ready   … summarizing   ✕ disabled   (blank: pending)",
+    "Summary:  ✓ ready   … summarizing   (blank: none yet). Summaries are always on.",
     "",
     "Returning to this menu from a Codex session:",
     "  ←  (left)      inside a Codex session, exits to menu ONLY when the prompt",
@@ -530,38 +525,49 @@ def _codex_passthrough(args: list[str]) -> int:
 
 
 def _maybe_auto_summarize(state, home):
-    """Trigger summarizers for sessions that just transitioned running -> ready."""
+    """Trigger summarizers for sessions that just transitioned running -> ready.
+
+    Summaries are always on for every session; there is no per-session toggle.
+    """
     prev = state.setdefault("prev_status", {})
     for sess in state["sessions"]:
         before = prev.get(sess.id)
         prev[sess.id] = sess.status
         if before == S.STATUS_RUNNING and sess.status == S.STATUS_READY:
-            if sess.summary_enabled and sess.summary_state == "none":
+            if sess.summary_state == "none":
                 SUM.trigger(sess.id, sess.rollout_path, home)
 
 
 def _view_summary(state, stdscr) -> None:
+    """Open the summary popup for the selected session; tap space (or Esc/q) to close."""
     if not state["filtered"]:
         return
     sess = state["filtered"][state["selected"]]
     text = sess.summary
     if not text:
-        # re-read in case state is stale
         text = SUM.read_summary(sess.id, state["home"])
     if not text:
-        _popup_confirm(stdscr, "Summary", [
+        # "No summary yet" — closes on space/Esc/q (consistent with summary popup).
+        h, w = stdscr.getmaxyx()
+        win, _, _, _ = _popup(stdscr, "Summary", [
             "No summary for this session yet.",
             "",
             f"summary state: {sess.summary_state}",
-        ])
+            "",
+            "press space/Esc to close",
+        ], 7, min(48, w - 2))
+        win.refresh()
+        while True:
+            ch = win.getch()
+            if ch in (ord(" "), 27, ord("q")):
+                break
+        _close_popup(win)
         return
-    # Show the (possibly long) summary in a scrollable-ish popup.
     h, w = stdscr.getmaxyx()
     width = min(max(60, w - 8), w - 2)
     height = min(20, h - 2)
-    win, top, _, inner_w = _popup(stdscr, f"Summary — {sess.short_id}", [], height, width)
-    # naive wrap into lines
-    out_lines = []
+    win, _, _, inner_w = _popup(stdscr, f"Summary — {sess.short_id}  (space to close)", [], height, width)
+    out_lines: list[str] = []
     for para in text.splitlines() or [text]:
         if not para:
             out_lines.append("")
@@ -571,14 +577,17 @@ def _view_summary(state, stdscr) -> None:
             para = para[inner_w - 1:]
         out_lines.append(para)
     max_body = height - 3
-    shown = out_lines[:max_body]
-    for i, ln in enumerate(shown):
+    for i, ln in enumerate(out_lines[:max_body]):
         try:
             win.addstr(1 + i, 2, _truncate(ln, inner_w - 2))
         except curses.error:
             pass
     win.refresh()
-    win.getch()
+    # Wait for a close key: space, Esc, or q.
+    while True:
+        ch = win.getch()
+        if ch in (ord(" "), 27, ord("q")):
+            break
     _close_popup(win)
 
 
@@ -636,22 +645,6 @@ def _run(stdscr, home: str | None):
         elif ch in (ord("r"), curses.KEY_REFRESH):
             state["last_refresh"] = 0.0
         elif ch == ord(" "):
-            # toggle summary on/off for the selected session
-            if state["filtered"]:
-                sess = state["filtered"][state["selected"]]
-                new_enabled = not sess.summary_enabled
-                SUM.set_enabled(sess.id, new_enabled, home)
-                if not new_enabled:
-                    # turning off: leave existing summary, but mark disabled
-                    pass
-                else:
-                    # turning on: if ready and no summary yet, summarize now
-                    if sess.status == S.STATUS_READY and sess.summary_state in ("none", "disabled"):
-                        if sess.summary_state == "disabled":
-                            SUM.reset_summary(sess.id, home)  # clears nothing if none
-                        SUM.trigger(sess.id, sess.rollout_path, home)
-                state["last_refresh"] = 0.0
-        elif ch == ord("s"):
             _view_summary(state, stdscr)
         elif ch == ord("d"):
             if state["filtered"]:

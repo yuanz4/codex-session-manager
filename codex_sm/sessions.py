@@ -42,8 +42,7 @@ class Session:
     name: str | None
     status: str = STATUS_READY
     summary: str | None = None
-    summary_state: str = "none"  # done | in_progress | disabled | none
-    summary_enabled: bool = True
+    summary_state: str = "none"  # done | in_progress | none
 
     @property
     def short_id(self) -> str:
@@ -197,7 +196,6 @@ def load_sessions(home_override: str | None = None) -> list[Session]:
             name=_row_value(row, "name"),
         )
         sess.status = compute_status(sess.rollout_path)
-        sess.summary_enabled = SUM.is_enabled(sess.id, home)
         sess.summary_state = SUM.summary_state(sess.id, home)
         if sess.summary_state == "done":
             sess.summary = SUM.read_summary(sess.id, home)

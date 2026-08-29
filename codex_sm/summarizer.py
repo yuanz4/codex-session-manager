@@ -9,7 +9,6 @@ the summary file.
 Storage (all under $CODEX_HOME):
   sm_summaries/<id>.txt      — the finished summary
   sm_summaries/<id>.pending  — marker while summarizing
-  sm_summary_prefs.json      — {session_id: bool_enabled}  (default enabled)
 """
 from __future__ import annotations
 
@@ -46,45 +45,7 @@ def pending_path(sess_id: str, home: str | None = None) -> str:
     return os.path.join(summaries_dir(home), sess_id + ".pending")
 
 
-def prefs_path(home: str | None = None) -> str:
-    return os.path.join(_home(home), "sm_summary_prefs.json")
-
-
-# ---------------------------------------------------------------- prefs
-
-_prefs_cache: dict | None = None
-
-
-def load_prefs(home: str | None = None) -> dict:
-    global _prefs_cache
-    if _prefs_cache is not None:
-        return _prefs_cache
-    try:
-        with open(prefs_path(home)) as f:
-            _prefs_cache = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        _prefs_cache = {}
-    if not isinstance(_prefs_cache, dict):
-        _prefs_cache = {}
-    return _prefs_cache
-
-
-def _save_prefs(home: str | None) -> None:
-    try:
-        with open(prefs_path(home), "w") as f:
-            json.dump(_prefs_cache or {}, f)
-    except OSError:
-        pass
-
-
-def is_enabled(sess_id: str, home: str | None = None) -> bool:
-    return bool(load_prefs(home).get(sess_id, True))
-
-
-def set_enabled(sess_id: str, enabled: bool, home: str | None = None) -> None:
-    prefs = load_prefs(home)
-    prefs[sess_id] = bool(enabled)
-    _save_prefs(home)
+# Summaries are always on for every session; there is no per-session toggle.
 
 
 # ---------------------------------------------------------------- final response
@@ -135,13 +96,11 @@ def get_final_response(rollout_path: str | None) -> str:
 # ---------------------------------------------------------------- state
 
 def summary_state(sess_id: str, home: str | None = None) -> str:
-    """One of: 'done', 'in_progress', 'disabled', 'none'."""
+    """One of: 'done', 'in_progress', 'none'.  Summaries are always on."""
     if os.path.exists(summary_path(sess_id, home)):
         return "done"
     if os.path.exists(pending_path(sess_id, home)):
         return "in_progress"
-    if not is_enabled(sess_id, home):
-        return "disabled"
     return "none"
 
 
@@ -181,8 +140,6 @@ def trigger(sess_id: str, rollout_path: str | None, home: str | None = None) -> 
     Idempotent: does nothing if already done or in progress.
     """
     if summary_state(sess_id, home) in ("done", "in_progress"):
-        return
-    if not is_enabled(sess_id, home):
         return
     content = get_final_response(rollout_path)
     if not content:
