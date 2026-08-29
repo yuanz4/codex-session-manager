@@ -409,9 +409,7 @@ def _new_session(state, stdscr) -> None:
             txt = txt[:-1]
         elif 32 <= ch <= 126:
             txt += chr(ch)
-        box.erase()
-        box.addstr(0, 0, txt)
-        box.refresh()
+        _safe_edit_draw(box, txt)
     curses.noecho()
     curses.curs_set(0)
     if txt is None:
@@ -419,6 +417,22 @@ def _new_session(state, stdscr) -> None:
     cwd = state["home_cwd"]
     name = T.ensure_new_session(txt or None, cwd)
     _enter_session(name, stdscr)
+
+
+def _safe_edit_draw(win, txt: str) -> None:
+    """Redraw a 1-line edit window, clamping text to its width. Never raises.
+
+    addstr past the last column of a window returns ERR in curses (and raises
+    here), which previously crashed the whole manager on long prompts/filters.
+    """
+    try:
+        _, ww = win.getmaxyx()
+        shown = txt[: max(0, ww - 1)]
+        win.erase()
+        win.addstr(0, 0, shown)
+        win.refresh()
+    except curses.error:
+        pass
 
 
 def _codex_passthrough(args: list[str]) -> int:
@@ -518,9 +532,7 @@ def _prompt_filter(stdscr) -> str:
             txt = txt[:-1]
         elif 32 <= ch <= 126:
             txt += chr(ch)
-        win.erase()
-        win.addstr(0, 0, txt)
-        win.refresh()
+        _safe_edit_draw(win, txt)
     curses.noecho()
     curses.curs_set(0)
     return txt

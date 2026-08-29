@@ -1,112 +1,71 @@
 # codex-session-manager
 
-An independent manager for [Codex](https://github.com/openai/codex) (Codex CLI) sessions.
-It reads Codex's **native** session store — the on-disk `state_*.sqlite` threads
-database and per-session `rollout-*.jsonl` event logs — and monitors each
-session's runtime status:
+Monitor and manage native [Codex](https://github.com/openai/codex) CLI sessions
+in an interactive, tmux-detachable UI. Reads Codex's own session store — no
+mocking, no scraping — and derives live status (running / ready / error) from
+Codex's rollout event logs.
 
-| status   | symbol | meaning                                  |
-|----------|:------:|------------------------------------------|
-| running  | `●`    | a turn is in progress (`task_started` w/o `task_complete`) |
-| ready    | `○`    | idle / finished (`task_complete`)        |
-| error    | `✖`    | the last event was an error               |
-
-Sessions are resumed with `codex resume <id>` inside **tmux**, so each session
-lives in its own detachable tmux session (`codex-<id>`). Detach with `Ctrl-b d`
-and you return to the manager.
+![codex-sm UI](assets/ui.svg)
 
 ## Requirements
 
 - Python 3.10+ (stdlib only — no pip dependencies)
-- `tmux` (for detachable attach; works without it, just less detachable)
+- `tmux` (for detachable sessions)
 - `codex` CLI on `PATH`
 
 ## Install
 
 ```bash
 git clone <this-repo> ~/codex-session-manager
-# option A: add to PATH
-export PATH="$HOME/codex-session-manager:$PATH"
-# option B: symlink
-ln -s ~/codex-session-manager/codex-sm ~/.local/bin/codex-sm
+export PATH="$HOME/codex-session-manager:$PATH"   # or symlink codex-sm to ~/.local/bin
 ```
 
 ## Usage
 
 ```bash
-codex-sm            # interactive TUI (auto-wraps in a tmux session named codex-sm)
-codex-sm list       # print sessions to stdout
-codex-sm list --json
-codex-sm status <id>      # status of one session (accepts short id prefix)
-codex-sm attach <id>      # resume <id> in a tmux session and switch to it
-codex-sm new [prompt]     # start a fresh Codex session in a tmux session
+codex-sm            # interactive UI (default)
+codex-sm list       # one-shot table   (--json for JSON)
+codex-sm status <id>      # one session (short id prefix OK)
+codex-sm attach <id>      # resume <id> in tmux and switch to it
+codex-sm new [prompt]     # start a fresh session in tmux
 codex-sm delete <id>      # passthrough to `codex delete`
-codex-sm --home /path     # override $CODEX_HOME (default ~/.codex)
+codex-sm --home /path     # override CODEX_HOME (default ~/.codex)
 ```
 
-### Interactive UI
+## Interactive UI
 
-Running `codex-sm` opens a curses list of all Codex sessions, auto-refreshed
-every 5s. Sessions are **grouped by status** — `● running`, `○ ready`, `✖ error`
-— with each group shown as a header followed by its sessions indented beneath.
-A session automatically moves between groups as its status changes: a running
-session drops into `ready` once its turn completes, and a failed one lands in
-`error`. The header bar shows per-group counts. Group headers are not
-selectable; `↑`/`↓` skip them and move between sessions across groups.
+Sessions are **grouped by status**, auto-refreshed every 5s and auto-relocated
+as status changes — a running session drops into `ready` when its turn
+finishes, a failed one lands in `error`.
 
-| key            | action                                              |
-|----------------|-----------------------------------------------------|
-| `↑` `↓` / `j` `k` | move selection (skips group headers)            |
-| `g` / `G`      | jump to top / bottom                                |
-| `Enter` / `→` | attach: resume that session in tmux and switch to it |
-| `n`            | new session (optional seed prompt)                   |
-| `r`            | refresh now (auto-refreshes every 5s)                |
-| `/`            | filter by title / id / cwd                           |
-| `D`            | delete selected (confirm) (`codex delete`)           |
-| `x`            | kill the tmux session for the selected codex session |
-| `?`            | show help / keybindings (in-app)                    |
-| `q` / `Esc`    | quit (clears filter first, then quits)              |
+| key | action |
+|-----|--------|
+| `↑` `↓` / `j` `k` | move selection (skips group headers) |
+| `g` / `G` | jump to top / bottom |
+| `Enter` / `→` | enter the selected session (resume in tmux) |
+| `n` | new session (optional seed prompt) |
+| `r` | refresh now · `/` filter · `D` delete · `x` kill tmux |
+| `?` | in-app help · `q`/`Esc` quit |
 
-**Arrow navigation:** `→` (right) on a session enters it; `←` (left) inside a
-Codex session switches back to this menu. Left is **context-aware**: inside
-Codex it exits only when the prompt is empty and the cursor is at the input
-start; otherwise it moves the cursor normally so text editing works as usual
-(detection uses the cursor column + Codex's dimmed placeholder).
+**In ↔ out:** `→` enters a session; inside a Codex session, `←` returns to the
+menu — but only when the prompt is empty and the cursor sits at the input start,
+so left-arrow cursor movement while editing still works normally.
 
-### Detaching
+Each session runs in its own tmux session (`codex-<id>`) behind the manager
+(`codex-sm`), so detaching never stops your agents.
 
-The manager runs in tmux session `codex-sm`. Each attached Codex session runs
-in tmux session `codex-<full-session-id>`. From a Codex session, pressing `←`
-(on an empty prompt) returns to the manager; `Ctrl-b d` detaches the client
-entirely (reattach with `tmux a -t codex-sm`).
+## How status is detected
 
-> When `codex-sm` is launched outside tmux, it automatically re-executes itself
-> inside a `codex-sm` tmux session so detaching works.
-
-## How status is detected (native)
-
-`codex_sm/sessions.py` reads:
-
-- `~/.codex/state_*.sqlite`, table `threads` — the list of all sessions
-  (`id`, `cwd`, `title`, `model`, `tokens_used`, `git_branch`,
-  timestamps, `rollout_path`, ...). This is exactly what `codex resume` shows.
-- the rollout JSONL at `rollout_path` — Codex appends `event_msg` entries with
-  `task_started` / `task_complete` / `error` per turn. The most recent
-  `task_started` turn without a matching `task_complete` ⇒ **running**; a
-  terminal `error` ⇒ **error**; otherwise **ready**. This mirrors Codex's
-  app-server `ThreadStatus` (`active` / `idle` / `systemError`).
-
-This is read-only against the native store; no Codex internals are modified.
+`codex_sm/sessions.py` reads `~/.codex/state_*.sqlite` (`threads` table, the
+same list `codex resume` uses) and each session's `rollout-*.jsonl`: the most
+recent `task_started` turn without a matching `task_complete` ⇒ **running**, a
+terminal `error` ⇒ **error**, else **ready** (mirrors Codex app-server
+`ThreadStatus`). Read-only — no Codex internals are modified.
 
 ## Layout
 
 ```
-codex-sm                  # launcher (sets PYTHONPATH, runs python -m codex_sm)
+codex-sm                 # launcher
 codex_sm/
-  __init__.py
-  __main__.py             # entry point
-  cli.py                  # argparse subcommands
-  sessions.py             # native codex store reader + status
-  tmux_util.py            # tmux session create / resume / switch / attach
-  tui.py                  # interactive curses UI
+  cli.py        sessions.py     tmux_util.py     tui.py     left_or_exit.sh
 ```
