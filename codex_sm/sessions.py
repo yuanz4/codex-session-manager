@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import glob
-import json
 import os
 import sqlite3
 import time
@@ -75,75 +74,6 @@ def find_threads_db(home: str) -> str | None:
         except sqlite3.Error:
             pass
     return None
-
-
-def _read_last_lines(path: str, max_bytes: int) -> list[str]:
-    size = os.path.getsize(path)
-    with open(path, "rb") as fh:
-        if size > max_bytes:
-            fh.seek(size - max_bytes)
-            fh.readline()
-        data = fh.read()
-    return data.decode("utf-8", "replace").splitlines()
-
-
-def _classify(lines: list[str]) -> tuple[str, bool, bool, bool]:
-    """Return (status, saw_started, saw_complete, saw_error)."""
-    last_started: str | None = None
-    completed: set[str] = set()
-    saw_error = False
-    last_event: str | None = None
-    saw_started = False
-    saw_complete = False
-    for ln in lines:
-        ln = ln.strip()
-        if not ln:
-            continue
-        try:
-            obj = json.loads(ln)
-        except json.JSONDecodeError:
-            continue
-        if obj.get("type") != "event_msg":
-            continue
-        payload = obj.get("payload") or {}
-        et = payload.get("type")
-        if et is None:
-            continue
-        last_event = et
-        if et == "task_started":
-            last_started = payload.get("turn_id") or last_started
-            saw_started = True
-        elif et == "task_complete":
-            tid = payload.get("turn_id")
-            if tid:
-                completed.add(tid)
-            saw_complete = True
-        elif et == "error":
-            saw_error = True
-    if saw_error and last_event == "error":
-        status = STATUS_ERROR
-    elif last_started and last_started not in completed:
-        status = STATUS_RUNNING
-    else:
-        status = STATUS_READY
-    return status, saw_started, saw_complete, saw_error
-
-
-def compute_status(rollout_path: str | None) -> str:
-    if not rollout_path or not os.path.exists(rollout_path):
-        return STATUS_READY
-    try:
-        tail_bytes = 1 << 18
-        lines = _read_last_lines(rollout_path, tail_bytes)
-        status, saw_started, saw_complete, _ = _classify(lines)
-        # If we found no turn markers at all and the file is large, do a full scan
-        if not saw_started and not saw_complete and os.path.getsize(rollout_path) > tail_bytes:
-            with open(rollout_path, "rb") as fh:
-                lines = fh.read().decode("utf-8", "replace").splitlines()
-            status, _, _, _ = _classify(lines)
-        return status
-    except (OSError, json.JSONDecodeError):
-        return STATUS_READY
 
 
 def _row_value(row: sqlite3.Row, name: str, default=None):

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import curses
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -342,12 +341,6 @@ def _show_help(stdscr) -> None:
     stdscr.nodelay(False)
     stdscr.getch()
     stdscr.timeout(1000)
-
-
-def _wrap_resume(args) -> int:
-    """Run codex resume directly (no tmux). Returns when codex exits."""
-    res = subprocess.run(["codex", "resume", args["sess_id"]])
-    return res.returncode
 
 
 def _enter_session(name: str, stdscr) -> None:

@@ -19,6 +19,8 @@ def _cmd_list(args) -> int:
                     "id": s.id,
                     "title": s.title,
                     "status": s.status,
+                    "summary_state": s.summary_state,
+                    "summary": s.summary,
                     "model": s.model,
                     "cwd": s.cwd,
                     "tokens": s.tokens,
@@ -73,6 +75,8 @@ def _cmd_status(args) -> int:
                 "cwd": sess.cwd,
                 "tokens": sess.tokens,
                 "updated_at": sess.updated_at,
+                "summary_state": sess.summary_state,
+                "summary": sess.summary,
                 "tmux_session": T.session_for(sess.id) if T.session_exists(T.session_for(sess.id)) else None,
             },
             indent=2,
@@ -122,7 +126,15 @@ def _expand_id(short_id: str, home: str | None) -> str:
 def _cmd_delete(args) -> int:
     import subprocess
 
-    return subprocess.run(["codex", "delete", _expand_id(args.id, args.home)]).returncode
+    # codex delete needs --force in a non-interactive subprocess (it otherwise
+    # requires a TTY for confirmation). Short-id prefixes are expanded to full UUIDs.
+    return subprocess.run(
+        ["codex", "delete", "--force", _expand_id(args.id, args.home)]
+    ).returncode
+
+
+def _cmd_tui(args) -> int:
+    return tui.run(home=args.home)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -157,10 +169,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_del.set_defaults(func=_cmd_delete)
 
     return p
-
-
-def _cmd_tui(args) -> int:
-    return tui.run(home=args.home)
 
 
 def main(argv: list[str] | None = None) -> int:
