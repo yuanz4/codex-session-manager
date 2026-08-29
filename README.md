@@ -6,6 +6,9 @@ each one did, so you can manage 10+ sessions at a glance.
 
 ![codex-session-manager](assets/session%20manager.png)
 
+Watch the demo: [https://youtu.be/RQNtqrnr-eQ](https://youtu.be/RQNtqrnr-eQ)
+(the video file is also in `assets/demo.mp4`)
+
 ## Getting started
 
 ```bash
