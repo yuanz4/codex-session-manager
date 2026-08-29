@@ -427,6 +427,9 @@ def _attach(state, stdscr) -> None:
             stdscr.refresh()
         return
     name = T.ensure_resume_session(sess.id, sess.cwd)
+    if not name:
+        _flash(stdscr, f"Could not resume {sess.short_id} (codex resume failed).")
+        return
     _enter_session(name, stdscr)
 
 

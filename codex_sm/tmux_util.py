@@ -76,34 +76,44 @@ def session_for(sess_id: str) -> str:
 
 
 def ensure_resume_session(sess_id: str, cwd: str) -> str:
-    """Create a detached tmux session running `codex resume <id>` if absent."""
+    """Create a detached tmux session running `codex resume <id>` if absent.
+
+    Never raises — returns the session name on success, or "" if the tmux
+    session could not be created (e.g. codex resume exited immediately).
+    """
     name = session_for(sess_id)
     if session_exists(name):
         return name
     cmd = f"codex resume {shlex.quote(sess_id)}"
     safe_cwd = cwd if (cwd and os.path.isdir(cwd)) else os.path.expanduser("~")
-    _run(
-        ["new-session", "-d", "-s", name, "-c", safe_cwd, cmd],
-        check=True,
-    )
+    res = _run(["new-session", "-d", "-s", name, "-c", safe_cwd, cmd])
+    if res.returncode != 0:
+        return ""
     _setup_return_keytable()
-    _apply_return_keytable(name)
+    if session_exists(name):
+        _apply_return_keytable(name)
     # Give codex a moment to take over the pane.
     time.sleep(0.3)
     return name
 
 
 def ensure_new_session(prompt: str | None, cwd: str) -> str:
-    """Create a detached tmux session running a fresh `codex` (optionally seeded)."""
+    """Create a detached tmux session running a fresh `codex` (optionally seeded).
+
+    Never raises — returns "" if the session could not be created.
+    """
     name = f"codex-new-{int(time.time())}"
     if prompt:
         cmd = f"codex {shlex.quote(prompt)}"
     else:
         cmd = "codex"
     safe_cwd = cwd if (cwd and os.path.isdir(cwd)) else os.path.expanduser("~")
-    _run(["new-session", "-d", "-s", name, "-c", safe_cwd, cmd], check=True)
+    res = _run(["new-session", "-d", "-s", name, "-c", safe_cwd, cmd])
+    if res.returncode != 0:
+        return ""
     _setup_return_keytable()
-    _apply_return_keytable(name)
+    if session_exists(name):
+        _apply_return_keytable(name)
     return name
 
 
