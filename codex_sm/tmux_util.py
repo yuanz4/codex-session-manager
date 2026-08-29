@@ -8,7 +8,7 @@ import time
 
 MANAGER_SESSION = "codex-sm"
 RETURN_KEYTABLE = "codex_session"  # per-session no-prefix key table for codex sessions
-RETURN_HINT = "← exits to menu when prompt is empty · Ctrl-b s to choose session"
+RETURN_HINT = "← exits to menu when prompt is empty"
 
 
 def _left_or_exit_path() -> str:

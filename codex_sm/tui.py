@@ -225,7 +225,6 @@ HELP_LINES = [
     "  ←  (left)      inside a Codex session, exits to menu ONLY when the prompt",
     "                  is empty and the cursor is at the input start. Otherwise ←",
     "                  moves the cursor normally so text editing is unaffected.",
-    "  Ctrl-b s       pick 'codex-sm' from tmux's session list (always available)",
     "",
     "Press any key to close this help.",
 ]
@@ -267,16 +266,13 @@ def _wrap_resume(args) -> int:
     return res.returncode
 
 
-RETURN_HINT = "  (Ctrl-b s then pick 'codex-sm' to return to this menu, or Ctrl-b d to detach)"
-
-
 def _enter_session(name: str, stdscr) -> None:
     """Switch this tmux client into a codex tmux session, keeping the manager alive.
 
-    The manager keeps running in the `codex-sm` tmux session in the background, so
-    the user can return via `Ctrl-b s` -> `codex-sm`. When there is no attached tmux
-    client (e.g. the manager is running detached) we leave the codex session
-    detached and show a hint instead of risking a nested attach.
+    The manager keeps running in the `codex-sm` tmux session in the background; the
+    user returns by pressing ← in the codex session (see left_or_exit.sh). When
+    there is no attached tmux client we leave the codex session detached and
+    show a hint instead of risking a nested attach.
     """
     if T.in_tmux():
         ok = T.switch_to(name)

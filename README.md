@@ -66,18 +66,14 @@ recency and auto-refreshed every 5s.
 Codex session switches back to this menu. Left is **context-aware**: inside
 Codex it exits only when the prompt is empty and the cursor is at the input
 start; otherwise it moves the cursor normally so text editing works as usual
-(detection uses the cursor column + Codex's dimmed placeholder). When in doubt,
-`Ctrl-b s` → `codex-sm` always returns to the menu.
+(detection uses the cursor column + Codex's dimmed placeholder).
 
-### Detaching / switching
+### Detaching
 
 The manager runs in tmux session `codex-sm`. Each attached Codex session runs
-in tmux session `codex-<full-session-id>`.
-
-- From a Codex session: `Ctrl-b d` (or `Ctrl-b : switch-client -t codex-sm`)
-  returns to the manager.
-- From the manager: `Ctrl-b s` lists tmux sessions to jump between Codex
-  sessions and the manager.
+in tmux session `codex-<full-session-id>`. From a Codex session, pressing `←`
+(on an empty prompt) returns to the manager; `Ctrl-b d` detaches the client
+entirely (reattach with `tmux a -t codex-sm`).
 
 > When `codex-sm` is launched outside tmux, it automatically re-executes itself
 > inside a `codex-sm` tmux session so detaching works.
