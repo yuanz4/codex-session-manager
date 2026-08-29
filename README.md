@@ -5,6 +5,8 @@ in an interactive, tmux-detachable UI. Reads Codex's own session store — no
 mocking, no scraping — and derives live status (running / ready / error) from
 Codex's rollout event logs.
 
+![codex-sm demo](assets/demo.gif)
+
 ![codex-sm UI](assets/ui.svg)
 
 ## Requirements
