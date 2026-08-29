@@ -103,10 +103,12 @@ def _ensure_screen(stdscr):
 
 def _column_layout(width: int) -> list[tuple[str, int]]:
     # (label, width). A leading SEL gutter renders the ▶ selection marker.
+    # ID uses 12 chars: enough of a UUIDv7 to distinguish sessions created
+    # close together (8 chars collide when created within the same minute).
     fixed = [
         ("SEL", 1),
         ("S", 2),
-        ("ID", 8),
+        ("ID", 13),
         ("SMRY", 4),
         ("MODEL", 14),
         ("AGE", 5),
@@ -119,7 +121,7 @@ def _column_layout(width: int) -> list[tuple[str, int]]:
     return [
         ("SEL", 1),
         ("S", 2),
-        ("ID", 8),
+        ("ID", 13),
         ("SMRY", 4),
         ("TITLE", title_w),
         ("MODEL", 14),

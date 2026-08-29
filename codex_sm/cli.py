@@ -35,7 +35,7 @@ def _cmd_list(args) -> int:
         print("No Codex sessions found.")
         return 0
     rows = sorted(items, key=lambda s: s.updated_at or 0, reverse=True)
-    cols = [(2, "S"), (8, "ID"), (38, "TITLE"), (14, "MODEL"), (18, "CWD"), (6, "AGE"), (8, "TOK")]
+    cols = [(2, "S"), (13, "ID"), (38, "TITLE"), (14, "MODEL"), (18, "CWD"), (6, "AGE"), (8, "TOK")]
 
     def _field(s, name, w):
         if name == "S":

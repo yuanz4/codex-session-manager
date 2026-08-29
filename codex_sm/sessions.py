@@ -45,7 +45,15 @@ class Session:
 
     @property
     def short_id(self) -> str:
-        return self.id.split("-")[0] if self.id else ""
+        # First segment + 4 chars of second segment of the UUIDv7 (13 chars).
+        # The first 8 chars (timestamp) collide for sessions created close
+        # together; including the second segment distinguishes them.
+        if not self.id:
+            return ""
+        parts = self.id.split("-")
+        if len(parts) >= 2:
+            return parts[0] + "-" + parts[1][:4]
+        return parts[0]
 
     @property
     def age(self) -> str:
@@ -138,6 +146,6 @@ def load_sessions(home_override: str | None = None) -> list[Session]:
 def find_by_id(sess_id: str, home_override: str | None = None) -> Session | None:
     sid = sess_id.strip().lower()
     for s in load_sessions(home_override):
-        if s.id.lower() == sid or s.short_id.lower() == sid:
+        if s.id.lower() == sid or s.short_id.lower() == sid or s.id.lower().startswith(sid):
             return s
     return None
