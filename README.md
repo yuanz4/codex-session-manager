@@ -46,12 +46,17 @@ codex-sm --home /path     # override $CODEX_HOME (default ~/.codex)
 
 ### Interactive UI
 
-Running `codex-sm` opens a curses list of all Codex sessions, auto-sorted by
-recency and auto-refreshed every 5s.
+Running `codex-sm` opens a curses list of all Codex sessions, auto-refreshed
+every 5s. Sessions are **grouped by status** — `● running`, `○ ready`, `✖ error`
+— with each group shown as a header followed by its sessions indented beneath.
+A session automatically moves between groups as its status changes: a running
+session drops into `ready` once its turn completes, and a failed one lands in
+`error`. The header bar shows per-group counts. Group headers are not
+selectable; `↑`/`↓` skip them and move between sessions across groups.
 
 | key            | action                                              |
 |----------------|-----------------------------------------------------|
-| `↑` `↓` / `j` `k` | move selection                                  |
+| `↑` `↓` / `j` `k` | move selection (skips group headers)            |
 | `g` / `G`      | jump to top / bottom                                |
 | `Enter` / `→` | attach: resume that session in tmux and switch to it |
 | `n`            | new session (optional seed prompt)                   |

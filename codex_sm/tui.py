@@ -91,6 +91,42 @@ def _column_layout(width: int) -> list[tuple[str, int]]:
     ]
 
 
+# Status groups, in display order. Sessions are sorted into these groups; a
+# session moves between groups automatically as its status changes (the TUI
+# re-groups on every refresh, so a running session lands under "running" and
+# slips to "ready" once its turn completes).
+GROUP_ORDER = [S.STATUS_RUNNING, S.STATUS_READY, S.STATUS_ERROR]
+
+
+def _grouped_sessions(sessions: list) -> list:
+    """Sort sessions into status groups, preserving recency within each group."""
+    order = {st: i for i, st in enumerate(GROUP_ORDER)}
+    return sorted(sessions, key=lambda s: (order.get(s.status, len(GROUP_ORDER)), -(s.updated_at or 0)))
+
+
+def _build_display(sessions: list) -> list[dict]:
+    """Return display rows: group headers + session rows.
+
+    Each session row carries `idx` = its index in `sessions` (the grouped list),
+    which the selection model uses. Group headers are not selectable.
+    """
+    rows: list[dict] = []
+    for g in GROUP_ORDER:
+        members = [(i, s) for i, s in enumerate(sessions) if s.status == g]
+        if not members:
+            continue
+        rows.append({"kind": "group", "status": g, "count": len(members)})
+        for i, s in members:
+            rows.append({"kind": "session", "idx": i, "sess": s})
+    # Any unrecognized status -> tail group so they still render.
+    others = [(i, s) for i, s in enumerate(sessions) if s.status not in GROUP_ORDER]
+    if others:
+        rows.append({"kind": "group", "status": "other", "count": len(others)})
+        for i, s in others:
+            rows.append({"kind": "session", "idx": i, "sess": s})
+    return rows
+
+
 def _draw(stdscr, state):
     stdscr.erase()
     h, w = stdscr.getmaxyx()
@@ -100,7 +136,9 @@ def _draw(stdscr, state):
 
     # Header
     home = S.codex_home(state.get("home"))
-    title = f" codex-session-manager  {len(sessions)} session(s)   {home}   {now} "
+    counts = {st: sum(1 for s in sessions if s.status == st) for st in GROUP_ORDER}
+    parts = "  ".join(f"{S.ICON.get(st,'?')} {st}:{counts[st]}" for st in GROUP_ORDER if counts[st])
+    title = f" codex-session-manager  {len(sessions)} session(s) ·{parts}   {home}   {now} "
     header_bar = title.ljust(w)[:w]
     try:
         stdscr.addstr(0, 0, header_bar, curses.color_pair(6) | curses.A_BOLD)
@@ -129,21 +167,46 @@ def _draw(stdscr, state):
     visible = body_bottom - body_top
     if visible < 1:
         visible = 1
-    if state["selected"] < state["offset"]:
-        state["offset"] = state["selected"]
-    elif state["selected"] >= state["offset"] + visible:
-        state["offset"] = state["selected"] - visible + 1
 
-    for i in range(visible):
-        idx = state["offset"] + i
-        if idx >= len(sessions):
+    display = _build_display(sessions)
+    # Map selected session index -> display row, to keep it scrolled into view.
+    sel_disp = 0
+    for di, r in enumerate(display):
+        if r["kind"] == "session" and r["idx"] == state["selected"]:
+            sel_disp = di
             break
-        sess = sessions[idx]
+    if state["offset"] > sel_disp:
+        state["offset"] = sel_disp
+    elif state["offset"] + visible <= sel_disp:
+        state["offset"] = sel_disp - visible + 1
+    if state["offset"] < 0:
+        state["offset"] = 0
+
+    INDENT = 2
+    for i in range(visible):
+        di = state["offset"] + i
+        if di >= len(display):
+            break
+        row = display[di]
         row_y = body_top + i
-        selected = idx == state["selected"]
+
+        if row["kind"] == "group":
+            st = row["status"]
+            icon = S.ICON.get(st, "?")
+            color = curses.color_pair(COLOR.get(st, 0)) | curses.A_BOLD
+            label = st if st != "other" else "other"
+            try:
+                stdscr.addstr(row_y, 0, " " * w)  # clear row
+                stdscr.addstr(row_y, 0, f"{icon} {label} ({row['count']})", color)
+            except curses.error:
+                pass
+            continue
+
+        sess = row["sess"]
+        selected = row["idx"] == state["selected"]
         attr_bar = curses.color_pair(5) if selected else 0
 
-        # full-width selection bar
+        # full-width selection bar (indented)
         try:
             stdscr.addstr(row_y, 0, " " * w, attr_bar)
         except curses.error:
@@ -160,10 +223,11 @@ def _draw(stdscr, state):
             f"{sess.tokens}",
         ]
         for (label, cw), cx, val in zip(layout, col_x, cols):
+            gx = cx + INDENT
             if label == "SEL":
                 if selected:
                     try:
-                        stdscr.addstr(row_y, cx, "▶", curses.color_pair(COLOR.get(sess.status, 0)) | curses.A_BOLD)
+                        stdscr.addstr(row_y, gx, "▶", curses.color_pair(COLOR.get(sess.status, 0)) | curses.A_BOLD)
                     except curses.error:
                         pass
                 continue
@@ -172,13 +236,13 @@ def _draw(stdscr, state):
                 if selected:
                     color = color | curses.A_BOLD
                 try:
-                    stdscr.addstr(row_y, cx, val.ljust(cw)[:cw], color)
+                    stdscr.addstr(row_y, gx, val.ljust(cw)[:cw], color)
                 except curses.error:
                     pass
                 continue
             text = _truncate(str(val), cw)
             try:
-                stdscr.addstr(row_y, cx, text.ljust(cw)[:cw], attr_bar)
+                stdscr.addstr(row_y, gx, text.ljust(cw)[:cw], attr_bar)
             except curses.error:
                 pass
 
@@ -373,14 +437,14 @@ def _run(stdscr, home: str | None):
         "filter": "",
         "last_refresh": 0.0,
     }
-    state["filtered"] = _filter(state["sessions"], "")
+    state["filtered"] = _grouped_sessions(_filter(state["sessions"], ""))
     curses.noecho()
 
     while True:
         now = time.time()
         if now - state["last_refresh"] >= REFRESH_SECS:
             state["sessions"] = S.load_sessions(home)
-            state["filtered"] = _filter(state["sessions"], state["filter"])
+            state["filtered"] = _grouped_sessions(_filter(state["sessions"], state["filter"]))
             state["last_refresh"] = now
             if state["selected"] >= len(state["filtered"]):
                 state["selected"] = max(0, len(state["filtered"]) - 1)
@@ -392,7 +456,7 @@ def _run(stdscr, home: str | None):
         if ch in (ord("q"), 27):
             if state["filter"]:
                 state["filter"] = ""
-                state["filtered"] = _filter(state["sessions"], "")
+                state["filtered"] = _grouped_sessions(_filter(state["sessions"], ""))
                 state["selected"] = 0
                 continue
             break
@@ -416,7 +480,7 @@ def _run(stdscr, home: str | None):
             state["last_refresh"] = 0.0
         elif ch == ord("/"):
             state["filter"] = _prompt_filter(stdscr)
-            state["filtered"] = _filter(state["sessions"], state["filter"])
+            state["filtered"] = _grouped_sessions(_filter(state["sessions"], state["filter"]))
             state["selected"] = 0
         elif ch == ord("D"):
             if state["filtered"]:
