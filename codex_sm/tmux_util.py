@@ -19,16 +19,26 @@ def _left_or_exit_path() -> str:
 def _setup_return_keytable() -> None:
     """Idempotently create the no-prefix key table used by codex sessions.
 
-    In that table only `Left` is bound: it runs a helper that inspects the codex
-    pane state and exits to the manager only when the prompt is empty and the
-    cursor sits at the start of the input; otherwise it forwards the Left
-    keystroke to Codex so editing behaves normally. Every other key passes
-    through to the pane application. The manager session keeps the default root
-    table, so this never affects the menu UI.
+    In that table:
+      - `Left` runs left_or_exit.sh (exits to menu when prompt is empty, else
+        forwards to Codex for cursor movement).
+      - `Up`/`Down`/`PageUp`/`PageDown`/`Home`/`End` pass through to the pane so
+        Codex and terminal scrollback work normally.
+      - `WheelUp`/`WheelDown` enter copy mode for scrollback, same as root.
+
+    All other keys pass through to the pane application. The manager session
+    keeps the default root table, so this never affects the menu UI.
     """
     script = _left_or_exit_path()
     _run(["bind-key", "-T", RETURN_KEYTABLE, "Left", "run-shell",
           f"{script} " + "#{pane_id}"])
+    for key in ("Up", "Down", "PageUp", "PageDown", "Home", "End"):
+        _run(["bind-key", "-T", RETURN_KEYTABLE, key, "send-keys", key])
+    # Mouse wheel: enter copy mode for scrollback (same as root table behavior)
+    _run(["bind-key", "-T", RETURN_KEYTABLE, "WheelUpPane",
+          "if-shell", "-F", "#{||:#{pane_in_mode},#{mouse_any_flag}}",
+          "send-keys -M", "copy-mode -e"])
+    _run(["bind-key", "-T", RETURN_KEYTABLE, "WheelDownPane", "send-keys", "-M"])
 
 
 def _apply_return_keytable(session_name: str) -> None:
