@@ -313,7 +313,7 @@ HELP_LINES = [
     "  q  /  Esc     quit",
     "",
     "Status:   ● running   ○ ready   ✖ error",
-    "Summary:  ✓ ready   … summarizing   (blank: none yet). Summaries are always on.",
+    "Summary:  ✓ ready   … summarizing   (blank: running / none yet). Always on;",
     "",
     "Returning to this menu from a Codex session:",
     "  ←  (left)      inside a Codex session, exits to menu ONLY when the prompt",
@@ -527,12 +527,15 @@ def _codex_passthrough(args: list[str]) -> int:
 def _maybe_auto_summarize(state, home):
     """Keep summaries up to date as turns complete.
 
-    Summaries are always on. On each refresh we ask the summarizer to (re)summarize
-    any session whose latest normally-completed turn differs from the one we last
-    summarized — this updates the summary during an ongoing conversation after
-    each turn that finishes normally, and produces one at startup for sessions
-    that lack a summary. Interrupted or errored turns are not summarized.
+    Summaries are always on. On each refresh:
+      - clear summaries of sessions that are now running (a new turn started) so
+        the SMRY column goes blank and the summary regenerates on completion;
+      - ask the summarizer to (re)summarize any session whose latest normally-
+        completed turn differs from the one we last summarized.
+
+    Interrupted or errored turns are not summarized.
     """
+    SUM.clear_running_summaries(state["sessions"], home)
     SUM.maybe_update(state["sessions"], home)
 
 
@@ -541,6 +544,24 @@ def _view_summary(state, stdscr) -> None:
     if not state["filtered"]:
         return
     sess = state["filtered"][state["selected"]]
+    state_sum = sess.summary_state
+    # If a summarizer is running, say so clearly instead of "no summary".
+    if state_sum == "in_progress":
+        h, w = stdscr.getmaxyx()
+        win, _, _, _ = _popup(stdscr, f"Summary — {sess.short_id}", [
+            "Still summarizing this session…",
+            "",
+            "The summary is being generated. Try again in a few seconds.",
+            "",
+            "press space/Esc to close",
+        ], 7, min(56, w - 2))
+        win.refresh()
+        while True:
+            ch = win.getch()
+            if ch in (ord(" "), 27, ord("q")):
+                break
+        _close_popup(win)
+        return
     text = sess.summary
     if not text:
         text = SUM.read_summary(sess.id, state["home"])
@@ -550,10 +571,10 @@ def _view_summary(state, stdscr) -> None:
         win, _, _, _ = _popup(stdscr, "Summary", [
             "No summary for this session yet.",
             "",
-            f"summary state: {sess.summary_state}",
+            "It will be summarized when its current turn completes normally.",
             "",
             "press space/Esc to close",
-        ], 7, min(48, w - 2))
+        ], 7, min(60, w - 2))
         win.refresh()
         while True:
             ch = win.getch()

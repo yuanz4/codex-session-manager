@@ -193,6 +193,31 @@ def reset_summary(sess_id: str, home: str | None = None) -> None:
             pass
 
 
+def clear_summary(sess_id: str, home: str | None = None) -> None:
+    """Clear an existing summary so it will be regenerated on the next normal turn.
+
+    Removes the .txt summary and the .turn marker, but leaves a .pending marker
+    alone (an in-flight summarizer will still finish and rewrite both).
+    """
+    for p in (summary_path(sess_id, home), turn_path(sess_id, home)):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def clear_running_summaries(sessions, home: str | None = None) -> None:
+    """Clear summaries for sessions that are currently running.
+
+    A running session has a new turn in progress; its (now-stale) summary should
+    disappear so the SMRY column goes blank, then re-summarize when the turn
+    completes normally. This makes the summary status track the conversation.
+    """
+    for sess in sessions:
+        if getattr(sess, "status", None) == "running":
+            clear_summary(sess.id, home)
+
+
 # ---------------------------------------------------------------- triggering
 
 def trigger(sess_id: str, rollout_path: str | None, home: str | None = None, force: bool = False) -> bool:
