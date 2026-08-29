@@ -29,6 +29,42 @@ def _truncate(text: str, width: int) -> str:
     return text[: width - 1] + "…"
 
 
+def _wrap_text(text: str, width: int) -> list[str]:
+    """Word-wrap text to fit `width`, preserving paragraph breaks (blank lines).
+
+    Wraps on spaces when possible; falls back to hard-breaking long words. Never
+    truncates — all content is shown across multiple lines.
+    """
+    if width <= 0:
+        return []
+    out: list[str] = []
+    for para in text.split("\n"):
+        if not para:
+            out.append("")
+            continue
+        words = para.split(" ")
+        line = ""
+        for word in words:
+            # A single word longer than width is hard-broken across lines.
+            while len(word) > width:
+                if line:
+                    out.append(line)
+                    line = ""
+                out.append(word[:width])
+                word = word[width:]
+            if line:
+                if len(line) + 1 + len(word) <= width:
+                    line += " " + word
+                else:
+                    out.append(line)
+                    line = word
+            else:
+                line = word
+        if line:
+            out.append(line)
+    return out
+
+
 def _wrap_in_tmux() -> None:
     """Re-exec the TUI inside a tmux session so codex sessions can detach back here."""
     if os.environ.get("CODEX_SM_NOWRAP"):
@@ -446,11 +482,12 @@ def _popup(stdscr, title: str, body_lines: list[str], height: int, width: int):
         pass
     y = 1
     for line in body_lines:
-        try:
-            win.addstr(y, 2, _truncate(line, width - 4))
-        except curses.error:
-            pass
-        y += 1
+        for wl in _wrap_text(line, width - 4):
+            try:
+                win.addstr(y, 2, wl)
+            except curses.error:
+                pass
+            y += 1
     win.refresh()
     return win, y, 2, width - 4
 
@@ -591,27 +628,50 @@ def _view_summary(state, stdscr) -> None:
     width = min(max(60, w - 8), w - 2)
     height = min(20, h - 2)
     win, _, _, inner_w = _popup(stdscr, f"Summary — {sess.short_id}  (space to close)", [], height, width)
-    out_lines: list[str] = []
-    for para in text.splitlines() or [text]:
-        if not para:
-            out_lines.append("")
-            continue
-        while len(para) > inner_w - 1:
-            out_lines.append(para[: inner_w - 1])
-            para = para[inner_w - 1:]
-        out_lines.append(para)
+    inner_w -= 2  # padding inside the border
+    out_lines = _wrap_text(text, max(10, inner_w))
+    # Scrollable view of out_lines.
     max_body = height - 3
-    for i, ln in enumerate(out_lines[:max_body]):
+    scroll = 0
+
+    def _draw_lines():
         try:
-            win.addstr(1 + i, 2, _truncate(ln, inner_w - 2))
+            win.border()
+            win.attron(curses.A_BOLD)
+            win.addstr(0, 2, f" Summary — {sess.short_id}  (space to close) ")
+            win.attroff(curses.A_BOLD)
         except curses.error:
             pass
-    win.refresh()
-    # Wait for a close key: space, Esc, or q.
+        for i in range(max_body):
+            idx = scroll + i
+            try:
+                if idx < len(out_lines):
+                    ln = out_lines[idx]
+                else:
+                    ln = ""
+                win.addstr(1 + i, 2, ln.ljust(inner_w))
+            except curses.error:
+                pass
+        # scroll indicator
+        if len(out_lines) > max_body:
+            indicator = f" {scroll + 1}-{min(scroll + max_body, len(out_lines))}/{len(out_lines)} "
+            try:
+                win.addstr(height - 1, width - len(indicator) - 2, indicator, curses.A_DIM)
+            except curses.error:
+                pass
+        win.refresh()
+
+    _draw_lines()
     while True:
         ch = win.getch()
         if ch in (ord(" "), 27, ord("q")):
             break
+        if ch in (curses.KEY_UP, ord("k")):
+            scroll = max(0, scroll - 1)
+            _draw_lines()
+        elif ch in (curses.KEY_DOWN, ord("j")):
+            scroll = min(max(0, len(out_lines) - max_body), scroll + 1)
+            _draw_lines()
     _close_popup(win)
 
 
