@@ -200,7 +200,7 @@ def _draw(stdscr, state):
     except curses.error:
         pass
 
-    keys = "Enter attach · n new · r refresh · /filter · a archive · D delete · x kill tmux · ? help · q quit"
+    keys = "Enter attach · n new · r refresh · /filter · a archive · u unarchive · D delete · x kill tmux · ? help · q quit"
     try:
         stdscr.addstr(h - 1, 0, _truncate(keys, w), curses.A_BOLD)
     except curses.error:
@@ -218,12 +218,15 @@ HELP_LINES = [
     "  r             refresh now   (auto-refreshes every 5s)",
     "  /             filter by title / id / cwd     (Esc clears)",
     "  a             archive selected  (codex archive)",
+    "  u             unarchive selected  (codex unarchive)",
     "  D             delete selected   (codex delete, confirm)",
     "  x             kill the tmux session for the selected Codex session",
     "  ?             show this help",
     "  q  /  Esc     quit  (clears filter first)",
     "",
     "Status:  ● running   ○ ready   ✖ error",
+    "",
+    "Archived sessions are hidden by default; start with:  codex-sm tui --all",
     "",
     "Returning to this menu from a Codex session:",
     "  Ctrl-b s       open tmux session list, choose 'codex-sm'",
@@ -428,6 +431,11 @@ def _run(stdscr, home: str | None, include_archived: bool):
             if state["filtered"]:
                 sess = state["filtered"][state["selected"]]
                 _codex_passthrough(["archive", sess.id])
+                state["last_refresh"] = 0.0
+        elif ch == ord("u"):
+            if state["filtered"]:
+                sess = state["filtered"][state["selected"]]
+                _codex_passthrough(["unarchive", sess.id])
                 state["last_refresh"] = 0.0
         elif ch == ord("D"):
             if state["filtered"]:

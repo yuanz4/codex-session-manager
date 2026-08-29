@@ -116,16 +116,27 @@ def _cmd_new(args) -> int:
     return 0
 
 
+def _expand_id(short_id: str, home: str | None) -> str:
+    sess = S.find_by_id(short_id, home)
+    return sess.id if sess else short_id
+
+
 def _cmd_archive(args) -> int:
     import subprocess
 
-    return subprocess.run(["codex", "archive", args.id]).returncode
+    return subprocess.run(["codex", "archive", _expand_id(args.id, args.home)]).returncode
 
 
 def _cmd_delete(args) -> int:
     import subprocess
 
-    return subprocess.run(["codex", "delete", args.id]).returncode
+    return subprocess.run(["codex", "delete", _expand_id(args.id, args.home)]).returncode
+
+
+def _cmd_unarchive(args) -> int:
+    import subprocess
+
+    return subprocess.run(["codex", "unarchive", _expand_id(args.id, args.home)]).returncode
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -164,6 +175,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_del = sub.add_parser("delete", help="Delete a session (passthrough to codex)")
     p_del.add_argument("id")
     p_del.set_defaults(func=_cmd_delete)
+
+    p_unarc = sub.add_parser("unarchive", help="Unarchive a session (passthrough to codex)")
+    p_unarc.add_argument("id")
+    p_unarc.set_defaults(func=_cmd_unarchive)
 
     return p
 
