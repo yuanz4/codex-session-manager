@@ -8,6 +8,7 @@ import sys
 import time
 
 from . import sessions as S
+from . import summarizer as SUM
 from . import tmux_util as T
 
 REFRESH_SECS = 5
@@ -71,6 +72,7 @@ def _column_layout(width: int) -> list[tuple[str, int]]:
         ("SEL", 1),
         ("S", 2),
         ("ID", 8),
+        ("SMRY", 4),
         ("MODEL", 14),
         ("AGE", 5),
         ("TOK", 8),
@@ -83,12 +85,28 @@ def _column_layout(width: int) -> list[tuple[str, int]]:
         ("SEL", 1),
         ("S", 2),
         ("ID", 8),
+        ("SMRY", 4),
         ("TITLE", title_w),
         ("MODEL", 14),
         ("CWD", cwd_w),
         ("AGE", 5),
         ("TOK", 8),
     ]
+
+
+def _summary_char(sess) -> str:
+    state = getattr(sess, "summary_state", "none")
+    if state == "done":
+        return "✓"
+    if state == "in_progress":
+        return "…"
+    if state == "disabled":
+        return "✕"
+    return " "
+
+
+SMRY_ATTR = {"done": 2, "in_progress": 4, "disabled": 0, "none": 0}  # color pair (2 green, 4 yellow)
+
 
 
 # Status groups, in display order. Sessions are sorted into these groups; a
@@ -216,6 +234,7 @@ def _draw(stdscr, state):
             "▶" if selected else " ",
             S.ICON.get(sess.status, "?"),
             sess.short_id,
+            _summary_char(sess),
             sess.title or "(no title)",
             sess.model,
             sess.cwd,
@@ -235,6 +254,18 @@ def _draw(stdscr, state):
                 color = curses.color_pair(COLOR.get(sess.status, 0))
                 if selected:
                     color = color | curses.A_BOLD
+                try:
+                    stdscr.addstr(row_y, gx, val.ljust(cw)[:cw], color)
+                except curses.error:
+                    pass
+                continue
+            if label == "SMRY":
+                cp = SMRY_ATTR.get(getattr(sess, "summary_state", "none"), 0)
+                color = curses.color_pair(cp) if cp else attr_bar
+                if selected and cp:
+                    color = color | curses.A_BOLD
+                if getattr(sess, "summary_state", "none") == "disabled":
+                    color = color | curses.A_DIM
                 try:
                     stdscr.addstr(row_y, gx, val.ljust(cw)[:cw], color)
                 except curses.error:
@@ -261,7 +292,7 @@ def _draw(stdscr, state):
     except curses.error:
         pass
 
-    keys = "→/Enter attach · n new · d delete · x kill tmux · ? help · q quit"
+    keys = "→/Enter attach · n new · s summary · space toggle-sum · d delete · x kill · ? help · q quit"
     try:
         stdscr.addstr(h - 1, 0, _truncate(keys, w), curses.A_BOLD)
     except curses.error:
@@ -277,12 +308,17 @@ HELP_LINES = [
     "  Enter / →     resume selected session in a tmux session, switch into it",
     "  n             start a new Codex session (popup for optional seed prompt)",
     "  r             refresh now   (auto-refreshes every 5s)",
+    "  s             view the stored summary for the selected session",
+    "  space         toggle auto-summary on/off for the selected session",
+    "                 on:  summarize when it becomes ready (and now if ready)",
+    "                 off: won't be summarized (existing summary is kept)",
     "  d             delete selected   (popup confirm; codex delete --force)",
     "  x             kill the tmux session for the selected Codex session",
     "  ?             show this help",
     "  q  /  Esc     quit",
     "",
-    "Status:  ● running   ○ ready   ✖ error",
+    "Status:   ● running   ○ ready   ✖ error",
+    "Summary:  ✓ ready   … summarizing   ✕ disabled   (blank: pending)",
     "",
     "Returning to this menu from a Codex session:",
     "  ←  (left)      inside a Codex session, exits to menu ONLY when the prompt",
@@ -493,8 +529,62 @@ def _codex_passthrough(args: list[str]) -> int:
     return subprocess.run(["codex", *args], capture_output=True, text=True).returncode
 
 
+def _maybe_auto_summarize(state, home):
+    """Trigger summarizers for sessions that just transitioned running -> ready."""
+    prev = state.setdefault("prev_status", {})
+    for sess in state["sessions"]:
+        before = prev.get(sess.id)
+        prev[sess.id] = sess.status
+        if before == S.STATUS_RUNNING and sess.status == S.STATUS_READY:
+            if sess.summary_enabled and sess.summary_state == "none":
+                SUM.trigger(sess.id, sess.rollout_path, home)
+
+
+def _view_summary(state, stdscr) -> None:
+    if not state["filtered"]:
+        return
+    sess = state["filtered"][state["selected"]]
+    text = sess.summary
+    if not text:
+        # re-read in case state is stale
+        text = SUM.read_summary(sess.id, state["home"])
+    if not text:
+        _popup_confirm(stdscr, "Summary", [
+            "No summary for this session yet.",
+            "",
+            f"summary state: {sess.summary_state}",
+        ])
+        return
+    # Show the (possibly long) summary in a scrollable-ish popup.
+    h, w = stdscr.getmaxyx()
+    width = min(max(60, w - 8), w - 2)
+    height = min(20, h - 2)
+    win, top, _, inner_w = _popup(stdscr, f"Summary — {sess.short_id}", [], height, width)
+    # naive wrap into lines
+    out_lines = []
+    for para in text.splitlines() or [text]:
+        if not para:
+            out_lines.append("")
+            continue
+        while len(para) > inner_w - 1:
+            out_lines.append(para[: inner_w - 1])
+            para = para[inner_w - 1:]
+        out_lines.append(para)
+    max_body = height - 3
+    shown = out_lines[:max_body]
+    for i, ln in enumerate(shown):
+        try:
+            win.addstr(1 + i, 2, _truncate(ln, inner_w - 2))
+        except curses.error:
+            pass
+    win.refresh()
+    win.getch()
+    _close_popup(win)
+
+
 def _run(stdscr, home: str | None):
     _ensure_screen(stdscr)
+    SUM.cleanup_stale_pending(home)  # orphaned .pending from a previous process
     state = {
         "home": home,
         "home_cwd": os.path.expanduser("~"),
@@ -503,14 +593,19 @@ def _run(stdscr, home: str | None):
         "selected": 0,
         "offset": 0,
         "last_refresh": 0.0,
+        "prev_status": {},
     }
     state["filtered"] = _grouped_sessions(state["sessions"])
+    # seed prev_status so we don't auto-summarize everything already ready at start
+    for s in state["sessions"]:
+        state["prev_status"][s.id] = s.status
     curses.noecho()
 
     while True:
         now = time.time()
         if now - state["last_refresh"] >= REFRESH_SECS:
             state["sessions"] = S.load_sessions(home)
+            _maybe_auto_summarize(state, home)
             state["filtered"] = _grouped_sessions(state["sessions"])
             state["last_refresh"] = now
             if state["selected"] >= len(state["filtered"]):
@@ -540,6 +635,24 @@ def _run(stdscr, home: str | None):
             _show_help(stdscr)
         elif ch in (ord("r"), curses.KEY_REFRESH):
             state["last_refresh"] = 0.0
+        elif ch == ord(" "):
+            # toggle summary on/off for the selected session
+            if state["filtered"]:
+                sess = state["filtered"][state["selected"]]
+                new_enabled = not sess.summary_enabled
+                SUM.set_enabled(sess.id, new_enabled, home)
+                if not new_enabled:
+                    # turning off: leave existing summary, but mark disabled
+                    pass
+                else:
+                    # turning on: if ready and no summary yet, summarize now
+                    if sess.status == S.STATUS_READY and sess.summary_state in ("none", "disabled"):
+                        if sess.summary_state == "disabled":
+                            SUM.reset_summary(sess.id, home)  # clears nothing if none
+                        SUM.trigger(sess.id, sess.rollout_path, home)
+                state["last_refresh"] = 0.0
+        elif ch == ord("s"):
+            _view_summary(state, stdscr)
         elif ch == ord("d"):
             if state["filtered"]:
                 sess = state["filtered"][state["selected"]]
@@ -550,6 +663,7 @@ def _run(stdscr, home: str | None):
                     f"  title: {sess.title or '(none)'}",
                 ]):
                     _codex_passthrough(["delete", "--force", sess.id])
+                    SUM.reset_summary(sess.id, home)
                     state["last_refresh"] = 0.0
         elif ch == ord("x"):
             # kill the tmux session for the selected codex session

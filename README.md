@@ -40,14 +40,23 @@ Sessions are **grouped by status**, auto-refreshed every 5s and auto-relocated
 as status changes — a running session drops into `ready` when its turn
 finishes, a failed one lands in `error`.
 
+**Auto-summarizer:** when a session finishes (running → ready), a throwaway
+Codex session is run to summarize its final response with a fixed prompt; the
+summary is stored beside the session and the summarizer session is deleted. A
+`SMRY` column shows the state — `✓` ready, `…` summarizing, `✕` disabled. Press
+`space` to toggle summarizing a session on/off.
+
 | key | action |
 |-----|--------|
 | `↑` `↓` / `j` `k` | move selection (skips group headers) |
 | `g` / `G` | jump to top / bottom |
 | `Enter` / `→` | enter the selected session (resume in tmux) |
 | `n` | new session (popup for optional seed prompt) |
+| `s` | view the stored summary for the selected session |
+| `space` | toggle auto-summary on/off for the selected session |
 | `d` | delete selected (popup confirm) |
-| `r` | refresh now · `x` kill tmux |
+| `x` | kill the tmux session for the selected codex session |
+| `r` | refresh now |
 | `?` | in-app help · `q`/`Esc` quit |
 
 **In ↔ out:** `→` enters a session; inside a Codex session, `←` returns to the
@@ -64,6 +73,17 @@ same list `codex resume` uses) and each session's `rollout-*.jsonl`: the most
 recent `task_started` turn without a matching `task_complete` ⇒ **running**, a
 terminal `error` ⇒ **error**, else **ready** (mirrors Codex app-server
 `ThreadStatus`). Read-only — no Codex internals are modified.
+
+## Auto-summarizer
+
+`codex_sm/summarizer.py` watches for running → ready transitions and, for an
+enabled session, runs `codex exec --json` with the session's final response
+(the `task_complete` `last_agent_message`) under a fixed brief-summary prompt.
+The summarizer's `thread_id` (from the JSONL) is deleted with
+`codex delete --force`, leaving only a sidecar summary under
+`~/.codex/sm_summaries/<id>.txt`; on/off prefs live in
+`~/.codex/sm_summary_prefs.json`. Stale `.pending` markers from a killed
+manager are cleaned at startup. Summarizer sessions are filtered from the UI.
 
 ## Layout
 

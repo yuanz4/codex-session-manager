@@ -7,6 +7,8 @@ import sqlite3
 import time
 from dataclasses import dataclass
 
+from . import summarizer as SUM
+
 DEFAULT_CODEX_HOME = os.path.expanduser("~/.codex")
 
 STATUS_RUNNING = "running"
@@ -39,6 +41,9 @@ class Session:
     preview: str
     name: str | None
     status: str = STATUS_READY
+    summary: str | None = None
+    summary_state: str = "none"  # done | in_progress | disabled | none
+    summary_enabled: bool = True
 
     @property
     def short_id(self) -> str:
@@ -169,6 +174,14 @@ def load_sessions(home_override: str | None = None) -> list[Session]:
             or _row_value(row, "preview")
             or ""
         )
+        # Hide summarizer sessions (transient; created+deleted by summarizer.py).
+        for k in ("first_user_message", "preview", "title", "name"):
+            v = _row_value(row, k)
+            if v and v.startswith(SUM.SUMMARIZER_MARKER):
+                title = None
+                break
+        if title is None:
+            continue
         sess = Session(
             id=_row_value(row, "id", ""),
             cwd=_row_value(row, "cwd", "") or "",
@@ -184,6 +197,10 @@ def load_sessions(home_override: str | None = None) -> list[Session]:
             name=_row_value(row, "name"),
         )
         sess.status = compute_status(sess.rollout_path)
+        sess.summary_enabled = SUM.is_enabled(sess.id, home)
+        sess.summary_state = SUM.summary_state(sess.id, home)
+        if sess.summary_state == "done":
+            sess.summary = SUM.read_summary(sess.id, home)
         sessions.append(sess)
 
     sessions.sort(key=lambda s: (s.updated_at or 0), reverse=True)
