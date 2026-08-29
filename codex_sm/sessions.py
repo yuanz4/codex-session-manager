@@ -195,7 +195,7 @@ def load_sessions(home_override: str | None = None) -> list[Session]:
             preview=_row_value(row, "preview", "") or "",
             name=_row_value(row, "name"),
         )
-        sess.status = compute_status(sess.rollout_path)
+        sess.status = SUM.analyze_rollout(sess.rollout_path)["status"]
         sess.summary_state = SUM.summary_state(sess.id, home)
         if sess.summary_state == "done":
             sess.summary = SUM.read_summary(sess.id, home)

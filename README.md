@@ -40,12 +40,14 @@ Sessions are **grouped by status**, auto-refreshed every 5s and auto-relocated
 as status changes — a running session drops into `ready` when its turn
 finishes, a failed one lands in `error`.
 
-**Auto-summarizer (always on):** when a session finishes (running → ready), a
-throwaway Codex session is run to summarize its final response with a fixed
-prompt; the summary is stored beside the session and the summarizer session is
-deleted. A `SMRY` column shows the state — `✓` ready, `…` summarizing, blank =
-none yet. Press `space` to open a session's summary; tap `space` (or `Esc`)
-again to close.
+**Auto-summarizer (always on):** at startup, every session missing a summary is
+summarized in parallel. During an ongoing conversation the summary is updated
+each time a turn completes *normally* — so it reflects the latest state.
+Interrupted or errored turns are not summarized (the summary stays at the last
+normally-completed turn). A throwaway Codex session runs the summary under a
+fixed prompt, then is deleted, leaving only a sidecar. The `SMRY` column shows
+`✓` ready · `…` summarizing · blank none-yet. Press `space` to open a session's
+summary; tap `space` (or `Esc`) again to close.
 
 | key | action |
 |-----|--------|
@@ -76,13 +78,17 @@ terminal `error` ⇒ **error**, else **ready** (mirrors Codex app-server
 
 ## Auto-summarizer
 
-`codex_sm/summarizer.py` watches for running → ready transitions and, for every
-session, runs `codex exec --json` with the session's final response
-(the `task_complete` `last_agent_message`) under a fixed brief-summary prompt.
-The summarizer's `thread_id` (from the JSONL) is deleted with
-`codex delete --force`, leaving only a sidecar summary under
-`~/.codex/sm_summaries/<id>.txt`. Stale `.pending` markers from a killed
-manager are cleaned at startup. Summarizer sessions are filtered from the UI.
+`codex_sm/summarizer.py` summarizes the latest *normally-completed* turn of
+each session: at startup it parallelizes summaries for any session missing one,
+and on each refresh it re-summarizes when a new turn completes normally (turn
+status is read from the rollout's `task_started`/`task_complete`/`error`
+events — turns that end via error or interrupt are skipped). It runs
+`codex exec --json --skip-git-repo-check` with the turn's
+`last_agent_message`, deletes the throwaway summarizer session with
+`codex delete --force`, and stores the summary under
+`~/.codex/sm_summaries/<id>.txt` (with `<id>.turn` tracking the last summarized
+turn). Stale `.pending` markers from a killed manager are cleaned at startup.
+Summarizer sessions are filtered from the UI.
 
 ## Layout
 

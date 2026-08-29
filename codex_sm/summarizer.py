@@ -1,14 +1,23 @@
-"""Auto-summarizer for finished Codex sessions.
+"""Auto-summarizer for Codex sessions.
 
-When a session transitions running -> ready, a temporary summarizer Codex
-session is created (`codex exec --json`), fed the session's final response with
-a fixed prompt, and its output is stored as a sidecar summary "attached" to
-that session. The summarizer session is then deleted, leaving no trace except
-the summary file.
+Summaries are always on. For every session:
+
+  - At manager startup, any session missing a summary is summarized (in
+    parallel background threads).
+  - During an ongoing conversation, the summary is updated each time a turn
+    completes *normally* — so it reflects the latest state. A turn that ends
+    normally is one whose rollout contains a `task_complete` event that is not
+    immediately preceded by an `error`/interrupt. Interrupted or errored turns
+    are NOT summarized (nor do they trigger an update).
+
+A summary is produced by a throwaway `codex exec --json` session fed the
+session's most recent normal-completion response under a fixed prompt; that
+summarizer session is then deleted, leaving only a sidecar summary.
 
 Storage (all under $CODEX_HOME):
   sm_summaries/<id>.txt      — the finished summary
   sm_summaries/<id>.pending  — marker while summarizing
+  sm_summaries/<id>.turn     — id of the last turn summarized (for updates)
 """
 from __future__ import annotations
 
@@ -27,6 +36,10 @@ SUMMARY_INSTRUCTION = (
 )
 
 EXEC_TIMEOUT = 240  # seconds
+MAX_PARALLEL = 4  # concurrent summarizers at startup
+
+# event types that mark a turn as NOT a normal completion
+ABNORMAL_EVENTS = {"error", "task_interrupted", "turn_interrupted"}
 
 
 def _home(home: str | None) -> str:
@@ -45,21 +58,34 @@ def pending_path(sess_id: str, home: str | None = None) -> str:
     return os.path.join(summaries_dir(home), sess_id + ".pending")
 
 
+def turn_path(sess_id: str, home: str | None = None) -> str:
+    return os.path.join(summaries_dir(home), sess_id + ".turn")
+
+
 # Summaries are always on for every session; there is no per-session toggle.
 
 
-# ---------------------------------------------------------------- final response
+# ---------------------------------------------------------------- rollout analysis
 
-def get_final_response(rollout_path: str | None) -> str:
-    """Extract the session's final response from its rollout JSONL.
+def analyze_rollout(rollout_path: str | None) -> dict:
+    """Scan a rollout JSONL and return the latest normally-completed turn.
 
-    Prefers the last `task_complete` event's `last_agent_message`; falls back to
-    the last few assistant messages.
+    Returns a dict:
+      { "status": running|ready|error,
+        "last_complete_turn": <turn_id or None>,
+        "last_message": <str or None>,
+        "abnormal": True if the last turn ended via error/interrupt }
+    A turn completes normally when its `task_complete` event is present and not
+    immediately preceded by an abnormal event (error/interrupt) for that turn.
     """
+    out = {"status": "ready", "last_complete_turn": None, "last_message": None, "abnormal": False}
     if not rollout_path or not os.path.exists(rollout_path):
-        return ""
-    last_msg: str | None = None
-    assistant: list[str] = []
+        return out
+    started_turns: set[str] = set()
+    completed_turns: dict[str, str | None] = {}  # turn_id -> last_agent_message
+    abnormal_turns: set[str] = set()
+    last_event: str | None = None
+    last_turn_seen: str | None = None
     try:
         with open(rollout_path, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -70,27 +96,52 @@ def get_final_response(rollout_path: str | None) -> str:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                t = obj.get("type")
-                if t == "event_msg":
-                    p = obj.get("payload") or {}
-                    if p.get("type") == "task_complete":
-                        m = p.get("last_agent_message")
-                        if m:
-                            last_msg = m
-                elif t == "response_item":
-                    p = obj.get("payload") or {}
-                    if p.get("type") == "message" and p.get("role") == "assistant":
-                        for c in p.get("content") or []:
-                            tx = c.get("text") if isinstance(c, dict) else None
-                            if tx:
-                                assistant.append(tx)
+                if obj.get("type") != "event_msg":
+                    continue
+                p = obj.get("payload") or {}
+                et = p.get("type")
+                if et is None:
+                    continue
+                last_event = et
+                tid = p.get("turn_id")
+                if tid:
+                    last_turn_seen = tid
+                if et == "task_started":
+                    if tid:
+                        started_turns.add(tid)
+                elif et == "task_complete":
+                    if tid:
+                        # A normal completion only if this turn was not flagged abnormal.
+                        if tid not in abnormal_turns:
+                            completed_turns[tid] = p.get("last_agent_message")
+                elif et in ABNORMAL_EVENTS:
+                    # attribute the abnormal end to the most recent started turn
+                    if tid and tid in started_turns:
+                        abnormal_turns.add(tid)
+                    elif last_turn_seen:
+                        abnormal_turns.add(last_turn_seen)
     except OSError:
-        return ""
-    if last_msg:
-        return last_msg
-    if assistant:
-        return "\n\n".join(assistant[-3:])
-    return ""
+        return out
+
+    # status: error if the terminal event is an error; running if an open turn
+    # has no completion; else ready.
+    if last_event in ABNORMAL_EVENTS:
+        out["status"] = "error"
+        out["abnormal"] = True
+    else:
+        # last started turn without a completion -> running
+        open_turns = [t for t in started_turns if t not in completed_turns and t not in abnormal_turns]
+        if open_turns:
+            out["status"] = "running"
+    # latest normally-completed turn (by occurrence order; dict preserves insertion order)
+    last_t = None
+    last_msg = None
+    for t, msg in completed_turns.items():
+        last_t = t
+        last_msg = msg
+    out["last_complete_turn"] = last_t
+    out["last_message"] = last_msg
+    return out
 
 
 # ---------------------------------------------------------------- state
@@ -102,6 +153,14 @@ def summary_state(sess_id: str, home: str | None = None) -> str:
     if os.path.exists(pending_path(sess_id, home)):
         return "in_progress"
     return "none"
+
+
+def last_summarized_turn(sess_id: str, home: str | None = None) -> str | None:
+    try:
+        with open(turn_path(sess_id, home), encoding="utf-8", errors="replace") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
 
 
 def read_summary(sess_id: str, home: str | None = None) -> str | None:
@@ -126,36 +185,94 @@ def cleanup_stale_pending(home: str | None = None) -> None:
 
 
 def reset_summary(sess_id: str, home: str | None = None) -> None:
-    """Remove the stored summary (and pending) for a session."""
-    for p in (summary_path(sess_id, home), pending_path(sess_id, home)):
+    """Remove the stored summary (and markers) for a session."""
+    for p in (summary_path(sess_id, home), pending_path(sess_id, home), turn_path(sess_id, home)):
         try:
             os.remove(p)
         except OSError:
             pass
 
 
-def trigger(sess_id: str, rollout_path: str | None, home: str | None = None) -> None:
-    """Start a background summarizer for the given session (non-blocking).
+# ---------------------------------------------------------------- triggering
 
-    Idempotent: does nothing if already done or in progress.
+def trigger(sess_id: str, rollout_path: str | None, home: str | None = None, force: bool = False) -> bool:
+    """Start a background summarizer for the latest normally-completed turn.
+
+    Skips (returns False) if:
+      - already done/in_progress and not forced
+      - no normally-completed turn exists (still running, or ended abnormally)
+      - the latest completed turn was already summarized (unless force)
+
+    Returns True if a summarizer was started.
     """
-    if summary_state(sess_id, home) in ("done", "in_progress"):
-        return
-    content = get_final_response(rollout_path)
-    if not content:
-        return
+    info = analyze_rollout(rollout_path)
+    turn = info["last_complete_turn"]
+    msg = info["last_message"]
+    if not turn or not msg:
+        return False
+    if not force:
+        if summary_state(sess_id, home) == "in_progress":
+            return False
+        if last_summarized_turn(sess_id, home) == turn and os.path.exists(summary_path(sess_id, home)):
+            return False  # already summarized this turn
     os.makedirs(summaries_dir(home), exist_ok=True)
-    # mark in-progress
     try:
         open(pending_path(sess_id, home), "w").close()
     except OSError:
-        return
+        return False
     threading.Thread(
-        target=_run_summarizer, args=(sess_id, content, home), daemon=True
+        target=_run_summarizer, args=(sess_id, turn, msg, home), daemon=True
     ).start()
+    return True
 
 
-def _run_summarizer(sess_id: str, content: str, home: str | None) -> None:
+def summarize_all_missing(sessions, home: str | None = None) -> None:
+    """Launch parallel summarizers for every session lacking a summary.
+
+    `sessions` is an iterable of objects with `.id`, `.rollout_path`,
+    `.status` attributes (e.g. codex_sm.sessions.Session). Sessions that are
+    currently running are skipped (no completed turn yet). Throttled to
+    MAX_PARALLEL concurrent summarizers.
+    """
+    sem = threading.Semaphore(MAX_PARALLEL)
+
+    def run(sess):
+        sem.acquire()
+        try:
+            trigger(sess.id, sess.rollout_path, home)
+        finally:
+            sem.release()
+
+    threads = []
+    for sess in sessions:
+        if getattr(sess, "status", None) == "running":
+            continue
+        if summary_state(sess.id, home) == "none":
+            t = threading.Thread(target=run, args=(sess,), daemon=True)
+            t.start()
+            threads.append(t)
+
+
+def maybe_update(state_sessions, home: str | None = None) -> None:
+    """Re-summarize sessions whose latest completed turn changed since last summary.
+
+    Called on each refresh. For each session, if it's ready (or error-but-had-a-
+    prior-normal-turn) and has a new normally-completed turn vs. what we last
+    summarized, trigger an update.
+    """
+    for sess in state_sessions:
+        info = analyze_rollout(sess.rollout_path)
+        turn = info["last_complete_turn"]
+        if not turn:
+            continue
+        if last_summarized_turn(sess.id, home) == turn and os.path.exists(summary_path(sess.id, home)):
+            continue
+        if summary_state(sess.id, home) == "in_progress":
+            continue
+        trigger(sess.id, sess.rollout_path, home, force=True)
+
+
+def _run_summarizer(sess_id: str, turn: str, content: str, home: str | None) -> None:
     prompt = (
         SUMMARY_INSTRUCTION
         + "\n\n<result>\n" + content + "\n</result>\n\n"
@@ -165,7 +282,7 @@ def _run_summarizer(sess_id: str, content: str, home: str | None) -> None:
     summary_parts: list[str] = []
     try:
         proc = subprocess.run(
-            ["codex", "exec", "--json"],
+            ["codex", "exec", "--json", "--skip-git-repo-check"],
             input=prompt,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -191,12 +308,13 @@ def _run_summarizer(sess_id: str, content: str, home: str | None) -> None:
             try:
                 with open(summary_path(sess_id, home), "w", encoding="utf-8") as f:
                     f.write(summary)
+                with open(turn_path(sess_id, home), "w", encoding="utf-8") as f:
+                    f.write(turn)
             except OSError:
                 pass
     except (subprocess.TimeoutExpired, OSError):
         pass
     finally:
-        # Delete the temporary summarizer Codex session.
         if thread_id:
             try:
                 subprocess.run(
@@ -207,7 +325,6 @@ def _run_summarizer(sess_id: str, content: str, home: str | None) -> None:
                 )
             except (OSError, subprocess.TimeoutExpired):
                 pass
-        # Clear the in-progress marker whether or not a summary was produced.
         try:
             os.remove(pending_path(sess_id, home))
         except OSError:

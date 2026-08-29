@@ -525,17 +525,15 @@ def _codex_passthrough(args: list[str]) -> int:
 
 
 def _maybe_auto_summarize(state, home):
-    """Trigger summarizers for sessions that just transitioned running -> ready.
+    """Keep summaries up to date as turns complete.
 
-    Summaries are always on for every session; there is no per-session toggle.
+    Summaries are always on. On each refresh we ask the summarizer to (re)summarize
+    any session whose latest normally-completed turn differs from the one we last
+    summarized — this updates the summary during an ongoing conversation after
+    each turn that finishes normally, and produces one at startup for sessions
+    that lack a summary. Interrupted or errored turns are not summarized.
     """
-    prev = state.setdefault("prev_status", {})
-    for sess in state["sessions"]:
-        before = prev.get(sess.id)
-        prev[sess.id] = sess.status
-        if before == S.STATUS_RUNNING and sess.status == S.STATUS_READY:
-            if sess.summary_state == "none":
-                SUM.trigger(sess.id, sess.rollout_path, home)
+    SUM.maybe_update(state["sessions"], home)
 
 
 def _view_summary(state, stdscr) -> None:
@@ -602,12 +600,10 @@ def _run(stdscr, home: str | None):
         "selected": 0,
         "offset": 0,
         "last_refresh": 0.0,
-        "prev_status": {},
     }
     state["filtered"] = _grouped_sessions(state["sessions"])
-    # seed prev_status so we don't auto-summarize everything already ready at start
-    for s in state["sessions"]:
-        state["prev_status"][s.id] = s.status
+    # At startup, summarize (in parallel) every session that's missing a summary.
+    SUM.summarize_all_missing(state["sessions"], home)
     curses.noecho()
 
     while True:
