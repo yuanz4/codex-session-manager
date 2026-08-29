@@ -12,7 +12,7 @@ Watch the demo: [https://youtu.be/RQNtqrnr-eQ](https://youtu.be/RQNtqrnr-eQ)
 ## Getting started
 
 ```bash
-git clone <this-repo> ~/codex-session-manager
+git clone https://github.com/yuanz4/codex-session-manager.git ~/codex-session-manager
 cd ~/codex-session-manager && ./codex-sm
 ```
 
