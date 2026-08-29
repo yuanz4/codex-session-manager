@@ -10,7 +10,7 @@ from . import tui
 
 
 def _cmd_list(args) -> int:
-    items = S.load_sessions(args.home, include_archived=args.all)
+    items = S.load_sessions(args.home)
     if args.json:
         out = []
         for s in items:
@@ -22,7 +22,6 @@ def _cmd_list(args) -> int:
                     "model": s.model,
                     "cwd": s.cwd,
                     "tokens": s.tokens,
-                    "archived": s.archived,
                     "updated_at": s.updated_at,
                     "age": s.age,
                     "rollout_path": s.rollout_path,
@@ -74,7 +73,6 @@ def _cmd_status(args) -> int:
                 "cwd": sess.cwd,
                 "tokens": sess.tokens,
                 "updated_at": sess.updated_at,
-                "archived": sess.archived,
                 "tmux_session": T.session_for(sess.id) if T.session_exists(T.session_for(sess.id)) else None,
             },
             indent=2,
@@ -121,22 +119,10 @@ def _expand_id(short_id: str, home: str | None) -> str:
     return sess.id if sess else short_id
 
 
-def _cmd_archive(args) -> int:
-    import subprocess
-
-    return subprocess.run(["codex", "archive", _expand_id(args.id, args.home)]).returncode
-
-
 def _cmd_delete(args) -> int:
     import subprocess
 
     return subprocess.run(["codex", "delete", _expand_id(args.id, args.home)]).returncode
-
-
-def _cmd_unarchive(args) -> int:
-    import subprocess
-
-    return subprocess.run(["codex", "unarchive", _expand_id(args.id, args.home)]).returncode
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -148,11 +134,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd")
 
     p_tui = sub.add_parser("tui", help="Interactive curses UI (default)")
-    p_tui.add_argument("--all", action="store_true", help="include archived sessions")
     p_tui.set_defaults(func=_cmd_tui)
 
     p_list = sub.add_parser("list", aliases=["ls"], help="List sessions to stdout")
-    p_list.add_argument("--all", action="store_true", help="include archived sessions")
     p_list.add_argument("--json", action="store_true", help="emit JSON")
     p_list.set_defaults(func=_cmd_list)
 
@@ -168,23 +152,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("prompt", nargs="?", default=None)
     p_new.set_defaults(func=_cmd_new)
 
-    p_arc = sub.add_parser("archive", help="Archive a session (passthrough to codex)")
-    p_arc.add_argument("id")
-    p_arc.set_defaults(func=_cmd_archive)
-
     p_del = sub.add_parser("delete", help="Delete a session (passthrough to codex)")
     p_del.add_argument("id")
     p_del.set_defaults(func=_cmd_delete)
-
-    p_unarc = sub.add_parser("unarchive", help="Unarchive a session (passthrough to codex)")
-    p_unarc.add_argument("id")
-    p_unarc.set_defaults(func=_cmd_unarchive)
 
     return p
 
 
 def _cmd_tui(args) -> int:
-    return tui.run(home=args.home, include_archived=getattr(args, "all", False))
+    return tui.run(home=args.home)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.cmd:
         # default to the interactive UI
-        return tui.run(home=args.home, include_archived=False)
+        return tui.run(home=args.home)
     return args.func(args)
 
 

@@ -35,15 +35,11 @@ ln -s ~/codex-session-manager/codex-sm ~/.local/bin/codex-sm
 
 ```bash
 codex-sm            # interactive TUI (auto-wraps in a tmux session named codex-sm)
-codex-sm tui --all  # interactive TUI including archived sessions
 codex-sm list       # print sessions to stdout
-codex-sm list --all # include archived sessions
 codex-sm list --json
 codex-sm status <id>      # status of one session (accepts short id prefix)
 codex-sm attach <id>      # resume <id> in a tmux session and switch to it
 codex-sm new [prompt]     # start a fresh Codex session in a tmux session
-codex-sm archive <id>     # archive (short id prefix OK; passthrough to `codex archive`)
-codex-sm unarchive <id>   # unarchive (short id prefix OK; passthrough to `codex unarchive`)
 codex-sm delete <id>      # passthrough to `codex delete`
 codex-sm --home /path     # override $CODEX_HOME (default ~/.codex)
 ```
@@ -61,8 +57,6 @@ recency and auto-refreshed every 5s.
 | `n`            | new session (optional seed prompt)                   |
 | `r`            | refresh now (auto-refreshes every 5s)                |
 | `/`            | filter by title / id / cwd                           |
-| `a`            | archive selected (`codex archive`)                  |
-| `u`            | unarchive selected (`codex unarchive`)              |
 | `D`            | delete selected (confirm) (`codex delete`)           |
 | `x`            | kill the tmux session for the selected codex session |
 | `?`            | show help / keybindings (in-app)                    |
@@ -74,9 +68,6 @@ Codex it exits only when the prompt is empty and the cursor is at the input
 start; otherwise it moves the cursor normally so text editing works as usual
 (detection uses the cursor column + Codex's dimmed placeholder). When in doubt,
 `Ctrl-b s` → `codex-sm` always returns to the menu.
-
-Archived sessions are hidden by default. Run `codex-sm tui --all` to list them;
-select one and press `u` to unarchive it back to active.
 
 ### Detaching / switching
 
@@ -96,7 +87,7 @@ in tmux session `codex-<full-session-id>`.
 `codex_sm/sessions.py` reads:
 
 - `~/.codex/state_*.sqlite`, table `threads` — the list of all sessions
-  (`id`, `cwd`, `title`, `model`, `tokens_used`, `git_branch`, `archived`,
+  (`id`, `cwd`, `title`, `model`, `tokens_used`, `git_branch`,
   timestamps, `rollout_path`, ...). This is exactly what `codex resume` shows.
 - the rollout JSONL at `rollout_path` — Codex appends `event_msg` entries with
   `task_started` / `task_complete` / `error` per turn. The most recent

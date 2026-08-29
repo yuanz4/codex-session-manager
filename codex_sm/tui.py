@@ -177,11 +177,8 @@ def _draw(stdscr, state):
                     pass
                 continue
             text = _truncate(str(val), cw)
-            a = attr_bar
-            if sess.archived:
-                a = (a | curses.A_DIM) if selected else curses.A_DIM
             try:
-                stdscr.addstr(row_y, cx, text.ljust(cw)[:cw], a)
+                stdscr.addstr(row_y, cx, text.ljust(cw)[:cw], attr_bar)
             except curses.error:
                 pass
 
@@ -190,7 +187,7 @@ def _draw(stdscr, state):
         cur = sessions[state["selected"]]
         status_line = (
             f" [{S.ICON.get(cur.status,'?')}] {cur.status}  id={cur.id}  "
-            f"cwd={cur.cwd}  {'archived ' if cur.archived else ''}"
+            f"cwd={cur.cwd}  "
             f"{'tmux:codex-'+cur.id if T.session_exists(T.session_for(cur.id)) else ''}"
         )
     else:
@@ -200,7 +197,7 @@ def _draw(stdscr, state):
     except curses.error:
         pass
 
-    keys = "→/Enter attach · n new · r refresh · /filter · a archive · u unarchive · D delete · x kill tmux · ? help · q quit"
+    keys = "→/Enter attach · n new · r refresh · /filter · D delete · x kill tmux · ? help · q quit"
     try:
         stdscr.addstr(h - 1, 0, _truncate(keys, w), curses.A_BOLD)
     except curses.error:
@@ -217,8 +214,6 @@ HELP_LINES = [
     "  n             start a new Codex session (optional seed prompt)",
     "  r             refresh now   (auto-refreshes every 5s)",
     "  /             filter by title / id / cwd     (Esc clears)",
-    "  a             archive selected  (codex archive)",
-    "  u             unarchive selected  (codex unarchive)",
     "  D             delete selected   (codex delete, confirm)",
     "  x             kill the tmux session for the selected Codex session",
     "  ?             show this help",
@@ -370,12 +365,12 @@ def _codex_passthrough(args: list[str]) -> int:
     return subprocess.run(["codex", *args]).returncode
 
 
-def _run(stdscr, home: str | None, include_archived: bool):
+def _run(stdscr, home: str | None):
     _ensure_screen(stdscr)
     state = {
         "home": home,
         "home_cwd": os.path.expanduser("~"),
-        "sessions": S.load_sessions(home, include_archived=include_archived),
+        "sessions": S.load_sessions(home),
         "filtered": [],
         "selected": 0,
         "offset": 0,
@@ -388,7 +383,7 @@ def _run(stdscr, home: str | None, include_archived: bool):
     while True:
         now = time.time()
         if now - state["last_refresh"] >= REFRESH_SECS:
-            state["sessions"] = S.load_sessions(home, include_archived=include_archived)
+            state["sessions"] = S.load_sessions(home)
             state["filtered"] = _filter(state["sessions"], state["filter"])
             state["last_refresh"] = now
             if state["selected"] >= len(state["filtered"]):
@@ -427,16 +422,6 @@ def _run(stdscr, home: str | None, include_archived: bool):
             state["filter"] = _prompt_filter(stdscr)
             state["filtered"] = _filter(state["sessions"], state["filter"])
             state["selected"] = 0
-        elif ch == ord("a"):
-            if state["filtered"]:
-                sess = state["filtered"][state["selected"]]
-                _codex_passthrough(["archive", sess.id])
-                state["last_refresh"] = 0.0
-        elif ch == ord("u"):
-            if state["filtered"]:
-                sess = state["filtered"][state["selected"]]
-                _codex_passthrough(["unarchive", sess.id])
-                state["last_refresh"] = 0.0
         elif ch == ord("D"):
             if state["filtered"]:
                 sess = state["filtered"][state["selected"]]
@@ -490,12 +475,12 @@ def _confirm(stdscr, msg: str) -> bool:
     return ch in (ord("y"), ord("Y"))
 
 
-def run(home: str | None = None, include_archived: bool = False) -> int:
+def run(home: str | None = None) -> int:
     if not T.in_tmux() and T.available():
         # Wrap ourselves in a tmux session so codex sessions can detach back here.
         _wrap_in_tmux()
         # If execvpe failed, fall through and run curses directly.
     try:
-        return curses.wrapper(_run, home, include_archived)
+        return curses.wrapper(_run, home)
     except KeyboardInterrupt:
         return 0

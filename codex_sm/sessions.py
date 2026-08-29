@@ -32,7 +32,6 @@ class Session:
     model: str
     source: str
     tokens: int
-    archived: bool
     created_at: int
     updated_at: int
     rollout_path: str | None
@@ -150,21 +149,18 @@ def _row_value(row: sqlite3.Row, name: str, default=None):
         return default
 
 
-def load_sessions(home_override: str | None = None, include_archived: bool = False) -> list[Session]:
+def load_sessions(home_override: str | None = None) -> list[Session]:
     home = codex_home(home_override)
     db = find_threads_db(home)
     if not db:
         return []
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
-    rows = list(con.execute("SELECT * FROM threads"))
+    rows = list(con.execute("SELECT * FROM threads WHERE archived = 0"))
     con.close()
 
     sessions: list[Session] = []
     for row in rows:
-        archived = bool(_row_value(row, "archived", 0))
-        if archived and not include_archived:
-            continue
         rollout_path = _row_value(row, "rollout_path")
         title = (
             _row_value(row, "name")
@@ -180,7 +176,6 @@ def load_sessions(home_override: str | None = None, include_archived: bool = Fal
             model=_row_value(row, "model", "") or "",
             source=_row_value(row, "source", "") or "",
             tokens=int(_row_value(row, "tokens_used", 0) or 0),
-            archived=archived,
             created_at=int(_row_value(row, "created_at", 0) or 0),
             updated_at=int(_row_value(row, "updated_at", 0) or 0),
             rollout_path=rollout_path,
@@ -197,7 +192,7 @@ def load_sessions(home_override: str | None = None, include_archived: bool = Fal
 
 def find_by_id(sess_id: str, home_override: str | None = None) -> Session | None:
     sid = sess_id.strip().lower()
-    for s in load_sessions(home_override, include_archived=True):
+    for s in load_sessions(home_override):
         if s.id.lower() == sid or s.short_id.lower() == sid:
             return s
     return None
