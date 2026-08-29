@@ -45,8 +45,9 @@ finishes, a failed one lands in `error`.
 | `↑` `↓` / `j` `k` | move selection (skips group headers) |
 | `g` / `G` | jump to top / bottom |
 | `Enter` / `→` | enter the selected session (resume in tmux) |
-| `n` | new session (optional seed prompt) |
-| `r` | refresh now · `/` filter · `D` delete · `x` kill tmux |
+| `n` | new session (popup for optional seed prompt) |
+| `d` | delete selected (popup confirm) |
+| `r` | refresh now · `x` kill tmux |
 | `?` | in-app help · `q`/`Esc` quit |
 
 **In ↔ out:** `→` enters a session; inside a Codex session, `←` returns to the

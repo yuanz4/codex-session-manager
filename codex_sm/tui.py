@@ -261,7 +261,7 @@ def _draw(stdscr, state):
     except curses.error:
         pass
 
-    keys = "→/Enter attach · n new · r refresh · /filter · D delete · x kill tmux · ? help · q quit"
+    keys = "→/Enter attach · n new · d delete · x kill tmux · ? help · q quit"
     try:
         stdscr.addstr(h - 1, 0, _truncate(keys, w), curses.A_BOLD)
     except curses.error:
@@ -275,13 +275,12 @@ HELP_LINES = [
     "  ↑ ↓  /  j k   move selection",
     "  g  /  G       top / bottom",
     "  Enter / →     resume selected session in a tmux session, switch into it",
-    "  n             start a new Codex session (optional seed prompt)",
+    "  n             start a new Codex session (popup for optional seed prompt)",
     "  r             refresh now   (auto-refreshes every 5s)",
-    "  /             filter by title / id / cwd     (Esc clears)",
-    "  D             delete selected   (codex delete, confirm)",
+    "  d             delete selected   (popup confirm; codex delete --force)",
     "  x             kill the tmux session for the selected Codex session",
     "  ?             show this help",
-    "  q  /  Esc     quit  (clears filter first)",
+    "  q  /  Esc     quit",
     "",
     "Status:  ● running   ○ ready   ✖ error",
     "",
@@ -312,16 +311,6 @@ def _show_help(stdscr) -> None:
     stdscr.nodelay(False)
     stdscr.getch()
     stdscr.timeout(1000)
-
-
-def _filter(sessions, text):
-    if not text:
-        return list(sessions)
-    t = text.lower()
-    return [
-        s for s in sessions
-        if t in (s.title or "").lower() or t in (s.id or "").lower() or t in (s.cwd or "").lower()
-    ]
 
 
 def _wrap_resume(args) -> int:
@@ -380,39 +369,16 @@ def _attach(state, stdscr) -> None:
 
 
 def _new_session(state, stdscr) -> None:
+    txt = _popup_input(stdscr, "New session", "prompt (optional, Enter to start):")
+    if txt is None:
+        return
     if not T.available():
         curses.endwin()
         try:
-            subprocess.run(["codex"] + (["env", "CODEX_SM_NEW=1"] if False else []))
+            subprocess.run(["codex"] + ([txt] if txt else []))
         finally:
             stdscr.touchwin()
             stdscr.refresh()
-        return
-    # Prompt for an optional seed, very small input loop.
-    curses.echo()
-    curses.curs_set(1)
-    h, w = stdscr.getmaxyx()
-    stdscr.addstr(h - 2, 0, " " * w)
-    stdscr.addstr(h - 2, 0, " new session — prompt (optional): ")
-    stdscr.refresh()
-    box = curses.newwin(1, max(20, w - 50), h - 2, 49)
-    box.keypad(True)
-    txt = ""
-    while True:
-        ch = box.getch()
-        if ch in (curses.KEY_ENTER, 10, 13):
-            break
-        if ch == 27:
-            txt = None
-            break
-        if ch in (curses.KEY_BACKSPACE, 127, 8):
-            txt = txt[:-1]
-        elif 32 <= ch <= 126:
-            txt += chr(ch)
-        _safe_edit_draw(box, txt)
-    curses.noecho()
-    curses.curs_set(0)
-    if txt is None:
         return
     cwd = state["home_cwd"]
     name = T.ensure_new_session(txt or None, cwd)
@@ -435,8 +401,96 @@ def _safe_edit_draw(win, txt: str) -> None:
         pass
 
 
+def _popup(stdscr, title: str, body_lines: list[str], height: int, width: int):
+    """Open a centered bordered popup window. Returns (win, inner_top, inner_left, inner_w).
+
+    Caller draws into win and reads input from it. Call _close_popup(win) after.
+    """
+    h, w = stdscr.getmaxyx()
+    height = min(height, h - 2)
+    width = min(width, w - 2)
+    top = max(1, (h - height) // 2)
+    left = max(1, (w - width) // 2)
+    win = curses.newwin(height, width, top, left)
+    win.keypad(True)
+    try:
+        win.border()
+        win.attron(curses.A_BOLD)
+        win.addstr(0, 2, f" {title} ")
+        win.attroff(curses.A_BOLD)
+    except curses.error:
+        pass
+    y = 1
+    for line in body_lines:
+        try:
+            win.addstr(y, 2, _truncate(line, width - 4))
+        except curses.error:
+            pass
+        y += 1
+    win.refresh()
+    return win, y, 2, width - 4
+
+
+def _close_popup(win) -> None:
+    try:
+        win.erase()
+        win.refresh()
+    except curses.error:
+        pass
+
+
+def _popup_input(stdscr, title: str, label: str, prefill: str = "") -> str | None:
+    """Draw a popup with a single text input. Return text on Enter, None on Esc."""
+    h, w = stdscr.getmaxyx()
+    width = min(max(60, len(label) + 30), w - 2)
+    height = 5
+    win, inner_top, _, inner_w = _popup(stdscr, title, [label], height, width)
+    box = curses.newwin(1, max(10, inner_w), stdscr.getmaxyx()[0] // 2 + 1,
+                        (stdscr.getmaxyx()[1] - width) // 2 + 2)
+    box.keypad(True)
+    curses.curs_set(1)
+    txt = prefill
+    _safe_edit_draw(box, txt)
+    while True:
+        ch = box.getch()
+        if ch in (curses.KEY_ENTER, 10, 13):
+            break
+        if ch == 27:
+            txt = None
+            break
+        if ch in (curses.KEY_BACKSPACE, 127, 8):
+            txt = txt[:-1]
+        elif 32 <= ch <= 126:
+            txt += chr(ch)
+        _safe_edit_draw(box, txt)
+    curses.curs_set(0)
+    _close_popup(win)
+    return txt
+
+
+def _popup_confirm(stdscr, title: str, lines: list[str]) -> bool:
+    """Draw a popup and read y/n. Returns True on y/Y/Enter, False on n/Esc/q."""
+    h, w = stdscr.getmaxyx()
+    width = min(max(50, max((len(l) for l in lines), default=0) + 6), w - 2)
+    height = min(len(lines) + 4, h - 2)
+    win, _, _, _ = _popup(stdscr, title, lines, height, width)
+    try:
+        win.addstr(height - 2, 2, "[y] yes   [n] no", curses.A_DIM)
+    except curses.error:
+        pass
+    win.refresh()
+    while True:
+        ch = win.getch()
+        if ch in (ord("y"), ord("Y"), curses.KEY_ENTER, 10, 13):
+            _close_popup(win)
+            return True
+        if ch in (ord("n"), ord("N"), 27, ord("q")):
+            _close_popup(win)
+            return False
+
+
 def _codex_passthrough(args: list[str]) -> int:
-    return subprocess.run(["codex", *args]).returncode
+    return subprocess.run(["codex", *args], capture_output=True, text=True).returncode
 
 
 def _run(stdscr, home: str | None):
@@ -448,17 +502,16 @@ def _run(stdscr, home: str | None):
         "filtered": [],
         "selected": 0,
         "offset": 0,
-        "filter": "",
         "last_refresh": 0.0,
     }
-    state["filtered"] = _grouped_sessions(_filter(state["sessions"], ""))
+    state["filtered"] = _grouped_sessions(state["sessions"])
     curses.noecho()
 
     while True:
         now = time.time()
         if now - state["last_refresh"] >= REFRESH_SECS:
             state["sessions"] = S.load_sessions(home)
-            state["filtered"] = _grouped_sessions(_filter(state["sessions"], state["filter"]))
+            state["filtered"] = _grouped_sessions(state["sessions"])
             state["last_refresh"] = now
             if state["selected"] >= len(state["filtered"]):
                 state["selected"] = max(0, len(state["filtered"]) - 1)
@@ -468,11 +521,6 @@ def _run(stdscr, home: str | None):
         if ch == -1:
             continue
         if ch in (ord("q"), 27):
-            if state["filter"]:
-                state["filter"] = ""
-                state["filtered"] = _grouped_sessions(_filter(state["sessions"], ""))
-                state["selected"] = 0
-                continue
             break
         if ch in (curses.KEY_UP, ord("k")):
             state["selected"] = max(0, state["selected"] - 1)
@@ -492,15 +540,16 @@ def _run(stdscr, home: str | None):
             _show_help(stdscr)
         elif ch in (ord("r"), curses.KEY_REFRESH):
             state["last_refresh"] = 0.0
-        elif ch == ord("/"):
-            state["filter"] = _prompt_filter(stdscr)
-            state["filtered"] = _grouped_sessions(_filter(state["sessions"], state["filter"]))
-            state["selected"] = 0
-        elif ch == ord("D"):
+        elif ch == ord("d"):
             if state["filtered"]:
                 sess = state["filtered"][state["selected"]]
-                if _confirm(stdscr, f"delete {sess.short_id}? y/n"):
-                    _codex_passthrough(["delete", sess.id])
+                if _popup_confirm(stdscr, "Delete session", [
+                    f"Permanently delete this session?",
+                    "",
+                    f"  id:    {sess.id}",
+                    f"  title: {sess.title or '(none)'}",
+                ]):
+                    _codex_passthrough(["delete", "--force", sess.id])
                     state["last_refresh"] = 0.0
         elif ch == ord("x"):
             # kill the tmux session for the selected codex session
@@ -508,43 +557,6 @@ def _run(stdscr, home: str | None):
                 sess = state["filtered"][state["selected"]]
                 T.kill_session(T.session_for(sess.id))
                 state["last_refresh"] = 0.0
-
-
-def _prompt_filter(stdscr) -> str:
-    h, w = stdscr.getmaxyx()
-    stdscr.addstr(h - 2, 0, " " * w)
-    stdscr.addstr(h - 2, 0, " filter: ")
-    stdscr.clrtoeol()
-    stdscr.refresh()
-    curses.echo()
-    curses.curs_set(1)
-    win = curses.newwin(1, max(20, w - 9), h - 2, 9)
-    win.keypad(True)
-    txt = ""
-    while True:
-        ch = win.getch()
-        if ch in (curses.KEY_ENTER, 10, 13):
-            break
-        if ch == 27:
-            txt = ""
-            break
-        if ch in (curses.KEY_BACKSPACE, 127, 8):
-            txt = txt[:-1]
-        elif 32 <= ch <= 126:
-            txt += chr(ch)
-        _safe_edit_draw(win, txt)
-    curses.noecho()
-    curses.curs_set(0)
-    return txt
-
-
-def _confirm(stdscr, msg: str) -> bool:
-    h, w = stdscr.getmaxyx()
-    stdscr.addstr(h - 2, 0, " " * w)
-    stdscr.addstr(h - 2, 0, f" {msg} ", curses.A_BOLD)
-    stdscr.refresh()
-    ch = stdscr.getch()
-    return ch in (ord("y"), ord("Y"))
 
 
 def run(home: str | None = None) -> int:
