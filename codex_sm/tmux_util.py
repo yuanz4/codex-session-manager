@@ -8,19 +8,27 @@ import time
 
 MANAGER_SESSION = "codex-sm"
 RETURN_KEYTABLE = "codex_session"  # per-session no-prefix key table for codex sessions
-RETURN_HINT = "← exits to menu · Ctrl-b s → choose 'codex-sm'"
+RETURN_HINT = "← exits to menu when prompt is empty · Ctrl-b s to choose session"
+
+
+def _left_or_exit_path() -> str:
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(here, "left_or_exit.sh")
 
 
 def _setup_return_keytable() -> None:
     """Idempotently create the no-prefix key table used by codex sessions.
 
-    In that table only `Left` is bound (→ switch back to the manager); every other
-    key falls through to the pane application (codex). The manager session keeps
-    the default root table, so this never affects the menu UI.
+    In that table only `Left` is bound: it runs a helper that inspects the codex
+    pane state and exits to the manager only when the prompt is empty and the
+    cursor sits at the start of the input; otherwise it forwards the Left
+    keystroke to Codex so editing behaves normally. Every other key passes
+    through to the pane application. The manager session keeps the default root
+    table, so this never affects the menu UI.
     """
-    _run(["bind-key", "-T", RETURN_KEYTABLE, "Left", "switch-client", "-t", MANAGER_SESSION])
-    # Also accept a plain `h` (vim-style left) only when the codex pane is idle?
-    # Not bound: `h` is needed for typing inside codex. Keep just Left.
+    script = _left_or_exit_path()
+    _run(["bind-key", "-T", RETURN_KEYTABLE, "Left", "run-shell",
+          f"{script} " + "#{pane_id}"])
 
 
 def _apply_return_keytable(session_name: str) -> None:

@@ -68,12 +68,12 @@ recency and auto-refreshed every 5s.
 | `?`            | show help / keybindings (in-app)                    |
 | `q` / `Esc`    | quit (clears filter first, then quits)              |
 
-**Arrow navigation:** `→` (right) on a session enters it; `←` (left) inside any
-Codex session switches back to this menu. The `←` binding is installed per
-Codex tmux session via a dedicated tmux key-table, so the manager UI is
-unaffected. Note: because `←` is intercepted inside Codex sessions, you can't
-use the left-arrow to move the cursor inside Codex's input box — use `Ctrl-b s`
-to return instead if you need full editing keys.
+**Arrow navigation:** `→` (right) on a session enters it; `←` (left) inside a
+Codex session switches back to this menu. Left is **context-aware**: inside
+Codex it exits only when the prompt is empty and the cursor is at the input
+start; otherwise it moves the cursor normally so text editing works as usual
+(detection uses the cursor column + Codex's dimmed placeholder). When in doubt,
+`Ctrl-b s` → `codex-sm` always returns to the menu.
 
 Archived sessions are hidden by default. Run `codex-sm tui --all` to list them;
 select one and press `u` to unarchive it back to active.

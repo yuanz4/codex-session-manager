@@ -227,8 +227,10 @@ HELP_LINES = [
     "Status:  ● running   ○ ready   ✖ error",
     "",
     "Returning to this menu from a Codex session:",
-    "  ←  (left)      inside any codex session, switches back here",
-    "  Ctrl-b s       pick 'codex-sm' from tmux's session list",
+    "  ←  (left)      inside a Codex session, exits to menu ONLY when the prompt",
+    "                  is empty and the cursor is at the input start. Otherwise ←",
+    "                  moves the cursor normally so text editing is unaffected.",
+    "  Ctrl-b s       pick 'codex-sm' from tmux's session list (always available)",
     "",
     "Press any key to close this help.",
 ]
