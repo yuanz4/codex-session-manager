@@ -13,8 +13,7 @@ Watch the demo: [https://youtu.be/RQNtqrnr-eQ](https://youtu.be/RQNtqrnr-eQ)
 
 ```bash
 git clone <this-repo> ~/codex-session-manager
-export PATH="$HOME/codex-session-manager:$PATH"
-codex-sm
+cd ~/codex-session-manager && ./codex-sm
 ```
 
 That's it — the interactive UI opens. You'll see all your Codex sessions listed
