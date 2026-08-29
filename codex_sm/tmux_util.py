@@ -7,6 +7,7 @@ import subprocess
 import time
 
 MANAGER_SESSION = "codex-sm"
+RETURN_HINT = "codex-sm: Ctrl-b s → select 'codex-sm' to return to menu"
 
 
 def available() -> bool:
@@ -75,11 +76,19 @@ def ensure_new_session(prompt: str | None, cwd: str) -> str:
     return name
 
 
+def display_message(msg: str, secs: float = 6.0) -> None:
+    """Show a message in the tmux status bar (persists for `secs` seconds)."""
+    _run(["display-message", "-d", str(int(secs * 1000)), msg])
+
+
 def switch_to(name: str) -> bool:
     """Switch the current tmux client to another session (non-blocking)."""
     if not in_tmux():
         return False
-    return _run(["switch-client", "-t", name]).returncode == 0
+    ok = _run(["switch-client", "-t", name]).returncode == 0
+    if ok:
+        display_message(f"[codex-sm] entered '{name}' — {RETURN_HINT}")
+    return ok
 
 
 def attach(name: str) -> None:
