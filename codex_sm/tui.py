@@ -66,19 +66,21 @@ def _ensure_screen(stdscr):
 
 
 def _column_layout(width: int) -> list[tuple[str, int]]:
-    # (label, weight-or-fixed). Weights share the remaining space.
+    # (label, width). A leading SEL gutter renders the ▶ selection marker.
     fixed = [
+        ("SEL", 1),
         ("S", 2),
         ("ID", 8),
         ("MODEL", 14),
         ("AGE", 5),
         ("TOK", 8),
     ]
-    used = sum(w for _, w in fixed)
+    used = sum(w for _, w in fixed) + (len(fixed) - 1)  # spaces between cols
     remaining = max(10, width - used - 2)
     title_w = max(20, int(remaining * 0.55))
     cwd_w = max(15, remaining - title_w)
     return [
+        ("SEL", 1),
         ("S", 2),
         ("ID", 8),
         ("TITLE", title_w),
@@ -110,8 +112,9 @@ def _draw(stdscr, state):
     col_x = []
     for label, cw in layout:
         col_x.append(x)
+        hdr = "" if label == "SEL" else label
         try:
-            stdscr.addstr(1, x, _truncate(label, cw), curses.A_BOLD)
+            stdscr.addstr(1, x, _truncate(hdr, cw), curses.A_BOLD)
         except curses.error:
             pass
         x += cw + 1
@@ -147,6 +150,7 @@ def _draw(stdscr, state):
             pass
 
         cols = [
+            "▶" if selected else " ",
             S.ICON.get(sess.status, "?"),
             sess.short_id,
             sess.title or "(no title)",
@@ -156,6 +160,13 @@ def _draw(stdscr, state):
             f"{sess.tokens}",
         ]
         for (label, cw), cx, val in zip(layout, col_x, cols):
+            if label == "SEL":
+                if selected:
+                    try:
+                        stdscr.addstr(row_y, cx, "▶", curses.color_pair(COLOR.get(sess.status, 0)) | curses.A_BOLD)
+                    except curses.error:
+                        pass
+                continue
             if label == "S":
                 color = curses.color_pair(COLOR.get(sess.status, 0))
                 if selected:
