@@ -189,12 +189,57 @@ def _draw(stdscr, state):
     except curses.error:
         pass
 
-    keys = "↑↓/jk move · Enter attach · n new · r refresh · /filter · a archive · D delete · q quit"
+    keys = "Enter attach · n new · r refresh · /filter · a archive · D delete · x kill tmux · ? help · q quit"
     try:
         stdscr.addstr(h - 1, 0, _truncate(keys, w), curses.A_BOLD)
     except curses.error:
         pass
     stdscr.refresh()
+
+
+HELP_LINES = [
+    "codex-session-manager — keybindings",
+    "",
+    "  ↑ ↓  /  j k   move selection",
+    "  g  /  G       top / bottom",
+    "  Enter         resume selected session in a tmux session, switch into it",
+    "  n             start a new Codex session (optional seed prompt)",
+    "  r             refresh now   (auto-refreshes every 5s)",
+    "  /             filter by title / id / cwd     (Esc clears)",
+    "  a             archive selected  (codex archive)",
+    "  D             delete selected   (codex delete, confirm)",
+    "  x             kill the tmux session for the selected Codex session",
+    "  ?             show this help",
+    "  q  /  Esc     quit  (clears filter first)",
+    "",
+    "Status:  ● running   ○ ready   ✖ error",
+    "",
+    "Returning to this menu from a Codex session:",
+    "  Ctrl-b s       open tmux session list, choose 'codex-sm'",
+    "  Ctrl-b d       detach (manager stays in 'codex-sm'; reattach: tmux a -t codex-sm)",
+    "",
+    "Press any key to close this help.",
+]
+
+
+def _show_help(stdscr) -> None:
+    h, w = stdscr.getmaxyx()
+    stdscr.erase()
+    try:
+        stdscr.addstr(0, 0, HELP_LINES[0], curses.A_BOLD)
+    except curses.error:
+        pass
+    for i, line in enumerate(HELP_LINES[1:], start=2):
+        if i >= h - 1:
+            break
+        try:
+            stdscr.addstr(i, 0, _truncate(line, w), curses.A_DIM if line.startswith("  ") else 0)
+        except curses.error:
+            pass
+    stdscr.refresh()
+    stdscr.nodelay(False)
+    stdscr.getch()
+    stdscr.timeout(1000)
 
 
 def _filter(sessions, text):
@@ -213,6 +258,41 @@ def _wrap_resume(args) -> int:
     return res.returncode
 
 
+RETURN_HINT = "  (Ctrl-b s then pick 'codex-sm' to return to this menu, or Ctrl-b d to detach)"
+
+
+def _enter_session(name: str, stdscr) -> None:
+    """Switch this tmux client into a codex tmux session, keeping the manager alive.
+
+    The manager keeps running in the `codex-sm` tmux session in the background, so
+    the user can return via `Ctrl-b s` -> `codex-sm`. When there is no attached tmux
+    client (e.g. the manager is running detached) we leave the codex session
+    detached and show a hint instead of risking a nested attach.
+    """
+    if T.in_tmux():
+        ok = T.switch_to(name)
+        if ok:
+            return
+        # No attached client to switch — leave the codex session detached.
+        _flash(stdscr, f"started '{name}' (detached). Attach with:  tmux attach -t {name}")
+        return
+    # Running outside tmux entirely (wrap failed): block on tmux attach, then resume.
+    curses.endwin()
+    subprocess.run(["tmux", "attach", "-t", name])
+    stdscr.touchwin()
+    stdscr.refresh()
+
+
+def _flash(stdscr, msg: str, secs: float = 2.5) -> None:
+    h, w = stdscr.getmaxyx()
+    try:
+        stdscr.addstr(h - 2, 0, " " * w)
+        stdscr.addstr(h - 2, 0, _truncate(msg, w), curses.A_BOLD)
+        stdscr.refresh()
+    except curses.error:
+        pass
+
+
 def _attach(state, stdscr) -> None:
     sessions = state["filtered"]
     if not sessions:
@@ -227,17 +307,7 @@ def _attach(state, stdscr) -> None:
             stdscr.refresh()
         return
     name = T.ensure_resume_session(sess.id, sess.cwd)
-    if T.in_tmux():
-        curses.endwin()
-        T.switch_to(name)
-        # While switched away this process keeps running in the background; on
-        # return the tmux client re-displays this pane and the refresh loop
-        # continues.
-        time.sleep(0.4)
-        stdscr.touchwin()
-        stdscr.refresh()
-    else:
-        T.attach(name)
+    _enter_session(name, stdscr)
 
 
 def _new_session(state, stdscr) -> None:
@@ -250,12 +320,11 @@ def _new_session(state, stdscr) -> None:
             stdscr.refresh()
         return
     # Prompt for an optional seed, very small input loop.
-    stdscr.echo()
+    curses.echo()
     curses.curs_set(1)
     h, w = stdscr.getmaxyx()
     stdscr.addstr(h - 2, 0, " " * w)
     stdscr.addstr(h - 2, 0, " new session — prompt (optional): ")
-    curses.echo()
     stdscr.refresh()
     box = curses.newwin(1, max(20, w - 50), h - 2, 49)
     box.keypad(True)
@@ -280,14 +349,7 @@ def _new_session(state, stdscr) -> None:
         return
     cwd = state["home_cwd"]
     name = T.ensure_new_session(txt or None, cwd)
-    if T.in_tmux():
-        curses.endwin()
-        T.switch_to(name)
-        time.sleep(0.4)
-        stdscr.touchwin()
-        stdscr.refresh()
-    else:
-        T.attach(name)
+    _enter_session(name, stdscr)
 
 
 def _codex_passthrough(args: list[str]) -> int:
@@ -343,6 +405,8 @@ def _run(stdscr, home: str | None, include_archived: bool):
             _attach(state, stdscr)
         elif ch == ord("n"):
             _new_session(state, stdscr)
+        elif ch == ord("?"):
+            _show_help(stdscr)
         elif ch in (ord("r"), curses.KEY_REFRESH):
             state["last_refresh"] = 0.0
         elif ch == ord("/"):

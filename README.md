@@ -53,14 +53,16 @@ recency and auto-refreshed every 5s.
 | key            | action                                              |
 |----------------|-----------------------------------------------------|
 | `↑` `↓` / `j` `k` | move selection                                  |
+| `g` / `G`      | jump to top / bottom                                |
 | `Enter`        | attach: resume that session in tmux and switch to it |
 | `n`            | new session (optional seed prompt)                   |
-| `r`            | refresh now                                         |
+| `r`            | refresh now (auto-refreshes every 5s)                |
 | `/`            | filter by title / id / cwd                           |
 | `a`            | archive selected (`codex archive`)                  |
 | `D`            | delete selected (confirm) (`codex delete`)           |
-| `x`            | kill the tmux session for the selected codex session|
-| `q` / `Esc`    | quit (clear filter first, then quit)                |
+| `x`            | kill the tmux session for the selected codex session |
+| `?`            | show help / keybindings (in-app)                    |
+| `q` / `Esc`    | quit (clears filter first, then quits)              |
 
 ### Detaching / switching
 
