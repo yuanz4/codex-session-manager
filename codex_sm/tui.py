@@ -527,16 +527,26 @@ def _codex_passthrough(args: list[str]) -> int:
 def _maybe_auto_summarize(state, home):
     """Keep summaries up to date as turns complete.
 
-    Summaries are always on. On each refresh:
-      - clear summaries of sessions that are now running (a new turn started) so
-        the SMRY column goes blank and the summary regenerates on completion;
-      - ask the summarizer to (re)summarize any session whose latest normally-
-        completed turn differs from the one we last summarized.
-
-    Interrupted or errored turns are not summarized.
+    Session status (running/ready/error) and summary status are independent: a
+    session moves to 'ready' the instant its turn completes; the summary
+    proceeds on its own (blank -> ... -> ready). On each refresh:
+      - clear summaries of sessions that are now running (a new turn started):
+        deletes the .txt so the SMRY column goes blank, regenerates on completion;
+      - (re)summarize sessions whose latest normally-completed turn differs from
+        the one we last summarized. Interrupted/errored turns are skipped.
     """
     SUM.clear_running_summaries(state["sessions"], home)
     SUM.maybe_update(state["sessions"], home)
+
+
+def _refresh_summary_states(sessions, home) -> None:
+    """Re-read each session's summary state/summary from disk so the UI reflects
+    changes the summarizer just made (clearing, starting, completing). Session
+    status is NOT recomputed here — it stays as loaded (independent of summary).
+    """
+    for s in sessions:
+        s.summary_state = SUM.summary_state(s.id, home)
+        s.summary = SUM.read_summary(s.id, home) if s.summary_state == "done" else None
 
 
 def _view_summary(state, stdscr) -> None:
@@ -544,7 +554,9 @@ def _view_summary(state, stdscr) -> None:
     if not state["filtered"]:
         return
     sess = state["filtered"][state["selected"]]
-    state_sum = sess.summary_state
+    # Read summary state from disk for accuracy (in-memory state may lag between
+    # auto-refreshes; session status and summary status are independent).
+    state_sum = SUM.summary_state(sess.id, state["home"])
     # If a summarizer is running, say so clearly instead of "no summary".
     if state_sum == "in_progress":
         h, w = stdscr.getmaxyx()
@@ -632,6 +644,7 @@ def _run(stdscr, home: str | None):
         if now - state["last_refresh"] >= REFRESH_SECS:
             state["sessions"] = S.load_sessions(home)
             _maybe_auto_summarize(state, home)
+            _refresh_summary_states(state["sessions"], home)
             state["filtered"] = _grouped_sessions(state["sessions"])
             state["last_refresh"] = now
             if state["selected"] >= len(state["filtered"]):

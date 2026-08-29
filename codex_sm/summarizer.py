@@ -211,11 +211,16 @@ def clear_running_summaries(sessions, home: str | None = None) -> None:
 
     A running session has a new turn in progress; its (now-stale) summary should
     disappear so the SMRY column goes blank, then re-summarize when the turn
-    completes normally. This makes the summary status track the conversation.
+    completes normally and the session moves to ready. Clears .txt, .turn, and
+    .pending so the column shows blank (not …) while running.
     """
     for sess in sessions:
         if getattr(sess, "status", None) == "running":
-            clear_summary(sess.id, home)
+            for p in (summary_path(sess.id, home), pending_path(sess.id, home), turn_path(sess.id, home)):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
 
 # ---------------------------------------------------------------- triggering
@@ -281,11 +286,16 @@ def summarize_all_missing(sessions, home: str | None = None) -> None:
 def maybe_update(state_sessions, home: str | None = None) -> None:
     """Re-summarize sessions whose latest completed turn changed since last summary.
 
-    Called on each refresh. For each session, if it's ready (or error-but-had-a-
-    prior-normal-turn) and has a new normally-completed turn vs. what we last
-    summarized, trigger an update.
+    Called on each refresh. Only summarizes sessions that are NOT currently
+    running — a running session's summary stays blank until the session finishes
+    (moves to ready), then the summary is generated. Interrupted/errored turns
+    are skipped (no last_complete_turn).
     """
     for sess in state_sessions:
+        # Skip sessions that are currently running: their summary was cleared and
+        # should stay blank until the turn completes and the session goes ready.
+        if getattr(sess, "status", None) == "running":
+            continue
         info = analyze_rollout(sess.rollout_path)
         turn = info["last_complete_turn"]
         if not turn:
